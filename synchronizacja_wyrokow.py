@@ -39,9 +39,30 @@ import utils
 import wyroki_cbosa as cbosa
 
 
-OKNO_METADANE_DNI     = 10
-OKNO_UZASADNIEN_DNI   = 180
-OKNO_PRAWOMOCNE_DNI   = 455   # ~15 miesiecy
+# Ruchome okna wstecz. Wartosci domyslne opisuja normalny, cotygodniowy bieg:
+# metadane 10 dni (z zapasem na jedna pominieta niedziele), uzasadnienia 180 dni
+# (MF publikuje je 2-3 miesiace po wyroku), prawomocnosc 455 dni (~15 miesiecy).
+#
+# DLACZEGO ZE ZMIENNYCH SRODOWISKOWYCH, A NIE NA SZTYWNO
+#   Gdy synchronizacja stoi dluzej niz okno metadanych, powstaje dziura, ktorej
+#   zwykly przebieg NIGDY nie nadrobi: patrzy 10 dni wstecz, a brakuje tygodni.
+#   Zdarzylo sie to realnie — zadanie padalo od 9 sierpnia do 6 wrzesnia przez
+#   brakujaca zaleznosc (PyPDF2), czyli siedem tygodni bez danych. Nadrobienie
+#   wymagalo wtedy edycji kodu, co jest zla droga dla operacji jednorazowej.
+#   Teraz wystarczy jednorazowo podniesc okno zmienna srodowiskowa; domyslne
+#   zachowanie pozostaje identyczne.
+def _dni(nazwa: str, domyslnie: int) -> int:
+    """Okno w dniach ze zmiennej srodowiskowej; bledna wartosc -> domyslna."""
+    try:
+        wartosc = int(os.environ.get(nazwa, "").strip() or domyslnie)
+        return wartosc if wartosc > 0 else domyslnie
+    except ValueError:
+        return domyslnie
+
+
+OKNO_METADANE_DNI     = _dni("WYROKI_OKNO_METADANE_DNI", 10)
+OKNO_UZASADNIEN_DNI   = _dni("WYROKI_OKNO_UZASADNIEN_DNI", 180)
+OKNO_PRAWOMOCNE_DNI   = _dni("WYROKI_OKNO_PRAWOMOCNE_DNI", 455)   # ~15 miesiecy
 
 
 def _wczytaj_config_supabase() -> dict:
@@ -324,7 +345,16 @@ def main():
         return
 
     print("=" * 70)
+<<<<<<< Updated upstream
     print("PickPivot — Synchronizacja Wyrokow CBOSA")
+=======
+    print("DorAIdca Radar — Synchronizacja Wyrokow CBOSA")
+    print(f"Okna wstecz: metadane {OKNO_METADANE_DNI} dni, "
+          f"uzasadnienia {OKNO_UZASADNIEN_DNI}, prawomocnosc {OKNO_PRAWOMOCNE_DNI}."
+          + ("  [NIESTANDARDOWE — nadrabianie zaleglosci]"
+             if (OKNO_METADANE_DNI, OKNO_UZASADNIEN_DNI, OKNO_PRAWOMOCNE_DNI)
+                != (10, 180, 455) else ""))
+>>>>>>> Stashed changes
     print("=" * 70)
 
     db = db_core.SupabaseDB(_wczytaj_config_supabase())

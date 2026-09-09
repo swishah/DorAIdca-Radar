@@ -23,6 +23,13 @@ on:
         description: 'Strumienie (tylko tryb pelny), np. 1,2,3'
         required: false
         default: '1,2,3'
+      dni_metadanych:
+        description: >-
+          Ile dni wstecz dla strumienia metadanych. Puste = 10 (normalny bieg).
+          Podnies TYLKO do nadrobienia zaleglosci: gdy zadanie stalo dluzej niz
+          10 dni, powstaje dziura, ktorej zwykly przebieg nigdy nie zobaczy.
+        required: false
+        default: ''
 
 jobs:
   synchronizuj-wyroki:
@@ -56,6 +63,7 @@ jobs:
       - name: Synchronizacja pelna (reczna)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.tryb == 'pelny'
         env:
+          WYROKI_OKNO_METADANE_DNI: ${{ github.event.inputs.dni_metadanych }}
           SUPABASE_HOST:     ${{ secrets.SUPABASE_HOST }}
           SUPABASE_PORT:     ${{ secrets.SUPABASE_PORT }}
           SUPABASE_DB:       ${{ secrets.SUPABASE_DB }}
@@ -66,6 +74,7 @@ jobs:
       - name: Synchronizacja pelna (harmonogram niedzielny)
         if: github.event_name == 'schedule'
         env:
+          WYROKI_OKNO_METADANE_DNI: ${{ github.event.inputs.dni_metadanych }}
           SUPABASE_HOST:     ${{ secrets.SUPABASE_HOST }}
           SUPABASE_PORT:     ${{ secrets.SUPABASE_PORT }}
           SUPABASE_DB:       ${{ secrets.SUPABASE_DB }}
