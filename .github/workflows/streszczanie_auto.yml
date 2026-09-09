@@ -1,13 +1,18 @@
-name: Automat streszczen (OpenRouter)
+name: Automat streszczen (OpenRouter) — WYLACZONY
 
 on:
-  # Rozprzezony harmonogram (kontrola egressu). Czasy UTC; PL = +2 h (lato).
+  # Harmonogram WYLACZONY: streszczanie zostaje wylacznie przez ChatGPT
+  # (prompt reczny) — OpenRouter jako automat okazal sie zbyt niskiej jakosci
+  # obok tego obiegu, wiec nie ma sensu utrzymywac dwoch rownoleglych metod.
+  # Workflow zostaje w repo (workflow_dispatch dalej dziala recznie), zamiast
+  # usuwac plik — gdyby kiedys wrocic do tematu.
+  #
+  # Byly czasy (Rozprzezony harmonogram, kontrola egressu; PL = +2 h lato):
   #  - dni robocze: 2x dziennie (UTC 8 i 14 = PL 10:00 i 16:00),
-  #  - weekend: "doganianie" co 3 h (UTC 6-21 = PL 8:00-23:00), bo w tygodniu
-  #    czesc streszczen nie zdazy sie zrobic przy oszczedzaniu egressu.
-  schedule:
-    - cron: '0 8,14 * * 1-5'
-    - cron: '0 6-21/3 * * 6,0'
+  #  - weekend: "doganianie" co 3 h (UTC 6-21 = PL 8:00-23:00).
+  # schedule:
+  #   - cron: '0 8,14 * * 1-5'
+  #   - cron: '0 6-21/3 * * 6,0'
 
   workflow_dispatch: {}
 
