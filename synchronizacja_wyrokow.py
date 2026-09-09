@@ -345,16 +345,12 @@ def main():
         return
 
     print("=" * 70)
-<<<<<<< Updated upstream
-    print("PickPivot — Synchronizacja Wyrokow CBOSA")
-=======
     print("DorAIdca Radar — Synchronizacja Wyrokow CBOSA")
     print(f"Okna wstecz: metadane {OKNO_METADANE_DNI} dni, "
           f"uzasadnienia {OKNO_UZASADNIEN_DNI}, prawomocnosc {OKNO_PRAWOMOCNE_DNI}."
           + ("  [NIESTANDARDOWE — nadrabianie zaleglosci]"
              if (OKNO_METADANE_DNI, OKNO_UZASADNIEN_DNI, OKNO_PRAWOMOCNE_DNI)
                 != (10, 180, 455) else ""))
->>>>>>> Stashed changes
     print("=" * 70)
 
     db = db_core.SupabaseDB(_wczytaj_config_supabase())
