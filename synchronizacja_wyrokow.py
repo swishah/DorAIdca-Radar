@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 synchronizacja_wyrokow.py — Cotygodniowa synchronizacja wyrokow sadow
-administracyjnych (CBOSA) do bazy PickPivot. Uruchamiana przez GitHub Actions
+administracyjnych (CBOSA) do bazy DorAIdca Radar. Uruchamiana przez GitHub Actions
 w niedziele (oraz recznie: workflow_dispatch).
 
 TRZY STRUMIENIE (sciezka C):
@@ -325,7 +325,7 @@ def main():
         return
 
     print("=" * 70)
-    print("PickPivot — Synchronizacja Wyrokow CBOSA")
+    print("DorAIdca Radar — Synchronizacja Wyrokow CBOSA")
     print("=" * 70)
 
     db = db_core.SupabaseDB(_wczytaj_config_supabase())

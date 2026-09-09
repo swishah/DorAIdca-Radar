@@ -50,7 +50,7 @@ def generuj_word(rekordy: list, podatek: str, opis_okresu: str, tytul_raportu: s
     opis_okresu: czytelny string np. "Styczen 2026" lub "06.01 — 10.01.2026"
     """
     doc = Document()
-    doc.add_heading(f"PickPivot — {tytul_raportu}: {podatek}", 0)
+    doc.add_heading(f"DorAIdca Radar — {tytul_raportu}: {podatek}", 0)
     doc.add_paragraph(f"Okres: {opis_okresu}")
     doc.add_paragraph(f"Wygenerowano: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     doc.add_paragraph(f"Liczba dokumentow: {len(rekordy)}")
@@ -385,7 +385,7 @@ def wyslij_email_powiadomienie_pobrania(
         for w in wyniki
     )
     temat_status = " [wymaga sprawdzenia]" if ma_niezgodnosc else ""
-    temat = f"PickPivot — Pobrano do bazy: {podatki_str} ({opis_okresu}){temat_status}"
+    temat = f"DorAIdca Radar — Pobrano do bazy: {podatki_str} ({opis_okresu}){temat_status}"
 
     def _status_kom(w):
         wer = w.get("weryfikacja")
@@ -407,7 +407,7 @@ def wyslij_email_powiadomienie_pobrania(
 
     tresc_html = f"""
     <html><body style="font-family: Arial, sans-serif;">
-    <h2>📥 PickPivot — Ściągacz Interpretacji: pobieranie na żądanie</h2>
+    <h2>📥 DorAIdca Radar — Ściągacz Interpretacji: pobieranie na żądanie</h2>
     <p><b>Okres:</b> {opis_okresu}</p>
     <p>Interpretacje zostały pobrane i zapisane w bazie danych. Podsumowanie:</p>
     <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse;">
@@ -417,7 +417,7 @@ def wyslij_email_powiadomienie_pobrania(
         {wiersze}
     </table>
     <p style="color: #888; font-size: 12px; margin-top: 20px;">
-        Wiadomość wygenerowana automatycznie przez PickPivot — Ściągacz Interpretacji.
+        Wiadomość wygenerowana automatycznie przez DorAIdca Radar — Ściągacz Interpretacji.
     </p>
     </body></html>
     """
@@ -474,7 +474,7 @@ def wyslij_email_synchronizacja_dzienna(
     else:
         znacznik = "✅"
 
-    temat = f"{znacznik} PickPivot — Synchronizacja dzienna {opis_okresu} ({nowych_lacznie} nowych)"
+    temat = f"{znacznik} DorAIdca Radar — Synchronizacja dzienna {opis_okresu} ({nowych_lacznie} nowych)"
 
     def _status_kom(w):
         wer = w.get("weryfikacja")
@@ -498,7 +498,7 @@ def wyslij_email_synchronizacja_dzienna(
 
     tresc_html = f"""
     <html><body style="font-family: Arial, sans-serif;">
-    <h2>🌙 PickPivot — Synchronizacja dzienna (automatyczna, 3:00)</h2>
+    <h2>🌙 DorAIdca Radar — Synchronizacja dzienna (automatyczna, 3:00)</h2>
     <p><b>Sprawdzony okres:</b> {opis_okresu} (ruchome okno 3 dni)</p>
     <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse;">
         <tr style="background-color: #2C3E50; color: white;">
@@ -507,7 +507,7 @@ def wyslij_email_synchronizacja_dzienna(
         {wiersze}
     </table>
     <p style="color: #888; font-size: 12px; margin-top: 20px;">
-        Wiadomość wygenerowana automatycznie o 3:00 przez PickPivot — Ściągacz Interpretacji
+        Wiadomość wygenerowana automatycznie o 3:00 przez DorAIdca Radar — Ściągacz Interpretacji
         (codzienna synchronizacja, GitHub Actions).
     </p>
     </body></html>
@@ -557,18 +557,18 @@ def wyslij_email_z_zalacznikiem(
         elif weryfikacja["status"] == "WERYFIKACJA_NIEUDANA":
             temat_status = " [ℹ️ niepotwierdzone]"
 
-    temat = f"PickPivot — Raport na zadanie: {podatek} ({opis_okresu}){temat_status}"
+    temat = f"DorAIdca Radar — Raport na zadanie: {podatek} ({opis_okresu}){temat_status}"
 
     tresc_html = f"""
     <html><body style="font-family: Arial, sans-serif;">
-    <h2>📄 PickPivot — Raport na żądanie</h2>
+    <h2>📄 DorAIdca Radar — Raport na żądanie</h2>
     <p><b>Podatek:</b> {podatek}</p>
     <p><b>Okres:</b> {opis_okresu}</p>
     <p><b>Liczba dokumentów:</b> {liczba_dok}</p>
     {badge_weryfikacji}
     <p style="margin-top: 20px;">Plik Word w załączniku.</p>
     <p style="color: #888; font-size: 12px;">
-        Wiadomość wygenerowana na żądanie użytkownika PickPivot.
+        Wiadomość wygenerowana na żądanie użytkownika DorAIdca Radar.
     </p>
     </body></html>
     """
@@ -652,7 +652,7 @@ def wyslij_email_podsumowanie_wielu(
         for w in wyniki
     )
     temat_status = " [⚠️ SPRAWDZ SZCZEGOLY]" if ma_niezgodnosc else ""
-    temat = f"PickPivot — Raport na zadanie: {podatki_str} ({opis_okresu}){temat_status}"
+    temat = f"DorAIdca Radar — Raport na zadanie: {podatki_str} ({opis_okresu}){temat_status}"
 
     def _status_kom(w):
         wer = w.get("weryfikacja")
@@ -683,7 +683,7 @@ def wyslij_email_podsumowanie_wielu(
 
     tresc_html = f"""
     <html><body style="font-family: Arial, sans-serif;">
-    <h2>📄 PickPivot — Raport na żądanie</h2>
+    <h2>📄 DorAIdca Radar — Raport na żądanie</h2>
     <p><b>Okres:</b> {opis_okresu}</p>
     <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse;">
         <tr style="background-color: #2C3E50; color: white;">
@@ -694,7 +694,7 @@ def wyslij_email_podsumowanie_wielu(
     {info_dolna}
     <p style="margin-top: 20px;">Pliki Word w załączniku (jeśli były dokumenty).</p>
     <p style="color: #888; font-size: 12px;">
-        Wiadomość wygenerowana na żądanie użytkownika PickPivot.
+        Wiadomość wygenerowana na żądanie użytkownika DorAIdca Radar.
     </p>
     </body></html>
     """

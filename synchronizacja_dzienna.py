@@ -82,7 +82,7 @@ def _wykonaj_probe(db, data_od, data_do, opis_okresu, numer_proby) -> list:
 
 def main():
     print("=" * 70)
-    print("PickPivot — Codzienna Synchronizacja Interpretacji (3:00)")
+    print("DorAIdca Radar — Codzienna Synchronizacja Interpretacji (3:00)")
     print("=" * 70)
 
     # Okno synchronizacji sterowane z workflow: częste przebiegi trzymają wąskie

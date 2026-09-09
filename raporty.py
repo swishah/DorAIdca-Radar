@@ -58,7 +58,7 @@ def _wyslij_github_dispatch(rok: int, miesiac: int, podatek: str) -> tuple:
     if repo.startswith("http") or "github.com" in repo:
         return False, (
             f"Pole 'repo' zawiera URL zamiast formatu 'login/nazwa-repo'. "
-            f"Masz: \"{repo}\" — popraw na sam login i nazwe repozytorium, np. \"jankowalski/pickpivot\"."
+            f"Masz: \"{repo}\" — popraw na sam login i nazwe repozytorium, np. \"jankowalski/doraidca-radar\"."
         )
     if "/" not in repo:
         return False, (
@@ -266,7 +266,7 @@ def _renderuj_pobieranie_na_zadanie():
                     st.markdown("""
 1. Wejdz na [github.com/settings/tokens](https://github.com/settings/tokens?type=beta)
 2. **Generate new token (fine-grained)**
-3. Wybierz repozytorium z aplikacja PickPivot
+3. Wybierz repozytorium z aplikacja DorAIdca Radar
 4. Uprawnienia: **Actions** → Read and write
 5. Skopiuj token i dodaj do Streamlit Secrets:
 ```toml

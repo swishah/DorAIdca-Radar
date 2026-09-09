@@ -13,7 +13,7 @@ from datetime import datetime
 # ---------------------------------------------------------------------------
 # ŚCIEŻKI I STAŁE
 # ---------------------------------------------------------------------------
-FOLDER_DOCELOWY = 'PickPivot_Data'
+FOLDER_DOCELOWY = 'DorAIdca_Radar_Data'
 if not os.path.exists(FOLDER_DOCELOWY):
     os.makedirs(FOLDER_DOCELOWY)
 

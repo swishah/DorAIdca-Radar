@@ -1,5 +1,5 @@
 """
-PickPivot CFO Analyzer — v3
+DorAIdca Radar CFO Analyzer — v3
 Pełna analiza wskaźnikowa z e-Sprawozdań KRS (XML/XAdES/HTML).
 ~50 wskaźników w 6 grupach, branżowe progi, encyklopedia, eksport Excel.
 """
@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 
 try:
-    st.set_page_config(page_title="PickPivot CFO", page_icon="📈", layout="wide")
+    st.set_page_config(page_title="DorAIdca Radar CFO", page_icon="📈", layout="wide")
 except Exception:
     pass
 
@@ -1067,7 +1067,7 @@ def _render_excel(dane_finansowe, df_wyniki, df_raw):
 
 
 def run_module():
-    st.title("📈 Analiza Wskaźnikowa CFO — PickPivot v3")
+    st.title("📈 Analiza Wskaźnikowa CFO — DorAIdca Radar v3")
     st.markdown(
         "Automatyczny audyt kondycji finansowej z e-Sprawozdań KRS. "
         "Wybierz branżę, wskaźniki i załaduj plik XML/XAdES/HTML."

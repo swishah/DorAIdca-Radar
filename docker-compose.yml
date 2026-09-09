@@ -11,5 +11,5 @@ services:
 
 networks:
   default:
-    name: pickpivot-net
+    name: doraidca-net
     external: true

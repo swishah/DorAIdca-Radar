@@ -1,6 +1,6 @@
 """
 wyroki_cbosa.py — Scraper Centralnej Bazy Orzeczen Sadow Administracyjnych
-(orzeczenia.nsa.gov.pl). Rdzen modulu Wyroki (modul 4 PickPivot).
+(orzeczenia.nsa.gov.pl). Rdzen modulu Wyroki (modul 4 DorAIdca Radar).
 
 ARCHITEKTURA (dlaczego tak):
   CBOSA nie ma API — to stara aplikacja formularzowa (HTML + sesja).
@@ -44,7 +44,7 @@ QUERY_URL  = f"{BAZA_URL}/cbo/query"
 FIND_URL   = f"{BAZA_URL}/cbo/find"
 DOC_URL    = f"{BAZA_URL}/doc/{{id}}"
 
-USER_AGENT = ("Mozilla/5.0 (compatible; PickPivot-Archiwum/1.0; "
+USER_AGENT = ("Mozilla/5.0 (compatible; DorAIdca-Radar-Archiwum/1.0; "
               "prywatne archiwum doradcy podatkowego)")
 
 # Naglowki "przegladarkowo-kompatybilne": czesc starszych systemow rzadowych

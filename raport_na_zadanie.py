@@ -86,7 +86,7 @@ def _wykonaj_probe(db, podatki_do_przetworzenia, data_od, data_do, opis_okresu, 
 
 def main(rok: int, miesiac: int, podatek: str):
     print("=" * 70)
-    print(f"PickPivot — Sciagacz Interpretacji — pobieranie na zadanie: {podatek} / {miesiac:02d}.{rok}")
+    print(f"DorAIdca Radar — Sciagacz Interpretacji — pobieranie na zadanie: {podatek} / {miesiac:02d}.{rok}")
     print("=" * 70)
 
     data_od, data_do, opis_okresu = silnik.zakres_z_roku_miesiaca(rok, miesiac)
