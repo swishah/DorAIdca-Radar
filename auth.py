@@ -81,6 +81,21 @@ def zapewnij_tabele() -> None:
         )
         """
     )
+    # Wiersz techniczny dla konta zaszytego DORADCA — samo logowanie z niego
+    # NIE korzysta (idzie przez st.secrets, patrz _zaloguj_doradca w app.py),
+    # ale parowanie wtyczki (dostep_wtyczki.py) i wtyczka-auth po stronie
+    # Supabase wymagają realnego wiersza w users (FK z wtyczka_kody, sprawdzenie
+    # rola/status przy wydawaniu i weryfikacji tokenu). ON CONFLICT DO NOTHING,
+    # żeby nie nadpisywać roli/statusu, gdyby ktoś kiedyś ręcznie je zmienił.
+    # lista_uzytkownikow() celowo pomija ten wiersz w panelu kont.
+    _db().wykonaj(
+        """
+        INSERT INTO users (email, rola, haslo_hash, status, utworzono)
+        VALUES ('DORADCA', 'admin', '', 'aktywne', %s)
+        ON CONFLICT (email) DO NOTHING
+        """,
+        (dt.datetime.now(dt.timezone.utc).isoformat(),),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -132,9 +147,12 @@ def pobierz_uzytkownika(email: str) -> dict | None:
 
 
 def lista_uzytkownikow() -> list[dict]:
+    # DORADCA ma tu wiersz techniczny (patrz zapewnij_tabele) tylko po to,
+    # żeby dało się z nim sparować wtyczkę — w panelu kont ma pozostać
+    # niewidoczny, tak jak zapowiada ustawienia_systemu.py.
     return _db().wykonaj(
         "SELECT id, email, rola, status, utworzono, aktywowano "
-        "FROM users ORDER BY email", fetch=True,
+        "FROM users WHERE email <> 'DORADCA' ORDER BY email", fetch=True,
     )
 
 

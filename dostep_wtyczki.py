@@ -142,17 +142,19 @@ def pokaz_dostep_wtyczki() -> None:
         st.warning("Ta sekcja wymaga zalogowania.")
         return
 
-    # KONTO DORADCA NIE ISTNIEJE W TABELI `users`.
-    #   To awaryjny superadmin z Secrets, poza bazą kont. Tabela kodów ma klucz
-    #   obcy do `users(email)`, więc próba wygenerowania kodu skończyłaby się
-    #   błędem bazy — a komunikat SQL nic by nie wyjaśnił.
+    # KONTO DORADCA ma wiersz techniczny w `users` (zapewnij_tabele w auth.py)
+    # wyłącznie po to, żeby to parowanie miało się do czego odwołać (FK z
+    # wtyczka_kody, sprawdzenie rola/status przy wydawaniu i weryfikacji
+    # tokenu w Edge Function). Token wystawiony w ten sposób jest wspólny dla
+    # każdego, kto zna hasło DORADCA z Secrets — jeśli z konta korzysta więcej
+    # niż jedna osoba, odwołanie urządzenia poniżej odwołuje WSZYSTKIE
+    # sparowane pod DORADCA, nie tylko jedno.
     if email == "DORADCA":
-        st.warning(
-            "Konto DORADCA jest kontem awaryjnym spoza bazy kont i nie da się "
-            "z nim sparować wtyczki. Zaloguj się na swój adres "
-            "@doradca.lublin.pl — parowanie wiąże token z konkretną osobą, "
-            "żeby dało się je później odwołać.", icon="⚠️")
-        return
+        st.info(
+            "Parujesz konto zaszyte DORADCA — token będzie wspólny dla "
+            "każdego, kto loguje się tym hasłem. Jeśli z konta korzysta "
+            "więcej osób, rozważ zamiast tego konta bazodanowe "
+            "(@doradca.lublin.pl) dla każdej z nich.", icon="ℹ️")
 
     st.caption(
         "Wtyczka rozpoznaje Cię po tokenie przypisanym do tego konta. Token "
