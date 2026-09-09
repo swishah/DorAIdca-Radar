@@ -52,7 +52,12 @@ import paleta
 import eksplorator_archiwum as _archiwum_ui
 
 
-PODATKI = ["PIT", "CIT", "VAT", "AKCYZA"]
+# Lista używana WYŁĄCZNIE do grupowania sekcji, gdy generuj() dostaje rekordy
+# kilku podatków naraz (podatek=""). Moduł 6 Streamlita zawsze podaje jeden
+# podatek, więc go to nie dotyczy — ale zestawienie zbiorcze z nowego
+# interfejsu tak: bez PCC pozycje tego podatku wypadłyby z PDF-u po cichu,
+# mimo że są w bazie i widać je na ekranie.
+PODATKI = ["PIT", "CIT", "VAT", "AKCYZA", "PCC"]
 
 
 def _fonty() -> tuple[str, str, bool]:
