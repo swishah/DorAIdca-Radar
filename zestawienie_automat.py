@@ -1,44 +1,33 @@
 # -*- coding: utf-8 -*-
 """
-MODUŁ 6: Zestawienie Tygodniowe — AUTOMAT (wersja próbna)
+MODUŁ 6: Zestawienie Tygodniowe
 ===============================================================================
-Równoległy do modułu 5. Zamiast wgrywać plik z GPT, streszcza interpretacje
-WPROST Z BAZY przez OpenRouter (darmowe modele) i renderuje TĘ SAMĄ tabelę
-(L.p. | Sygnatura | Data wydania | Temat | Streszczenie), z zielonym
-oznaczeniem publikacji opóźnionych (identyczna zasada jak w module 5).
-
-Cel: porównać jakość darmowego streszczania z dotychczasowym obiegiem DOCX.
+Renderuje tabelę (L.p. | Sygnatura | Data wydania | Temat | Streszczenie)
+z zielonym oznaczeniem publikacji opóźnionych (identyczna zasada jak
+w module 5). Renderer i logika tygodni pn–nd są współdzielone z modułem 5.
 
 Źródło danych: tabela `dokumenty` (ta sama, którą zasila synchronizacja
-dzienna). Nowe interpretacje pojawiają się tu automatycznie — wystarczy je
-streścić (przycisk „Streść brakujące”). Wyniki trafiają do `streszczenia_auto`
-i nie są liczone ponownie (oszczędza darmowy limit).
+dzienna) + `streszczenia_auto` ze streszczeniami.
 
-WYMAGA: sekcji [openrouter] w Streamlit Secrets z kluczem api_key
-oraz kolumny dokumenty.pobrano_at (migracja_pobrano_at.sql).
-Renderer i logika tygodni pn–nd są współdzielone z modułem 5.
+WYMAGA kolumny dokumenty.pobrano_at (migracja_pobrano_at.sql).
 
-STRESZCZENIA Z WTYCZKI PRZEGLĄDARKOWEJ
-  Wtyczka Skaner Doradca zapisuje streszczenia do TEJ SAMEJ tabeli i pod TYM
-  SAMYM modelem co automat (kolumna `zrodlo` mówi, kto je zrobił). Dzięki temu
-  pojawiają się tutaj bez żadnych zmian w zapytaniach, a automat ich nie
-  powtarza.
+SKĄD BIORĄ SIĘ STRESZCZENIA
+  Wyłącznie z ChatGPT — wtyczka Skaner Doradca albo ręczny prompt w Custom
+  GPT, przez Edge Functions gpt-*. Ten moduł ich NIE generuje; wcześniejsza
+  ścieżka OpenRoutera (lista modeli + przycisk „Streść brakujące”) została
+  wyłączona, bo dublowała obieg ChatGPT gorszą jakością.
 
-  Różnica jest jedna: wtyczka zapisuje dodatkowo PEŁNY układ z sekcjami
-  (kolumna `streszczenie_pelne`), którego automat nie generuje — jego prompt
-  prosi wyłącznie o zwięzłą prozę. Pozycje z pełną wersją są oznaczone rombem
-  i można je rozwinąć pod tabelą.
+  Wszystko zapisuje się pod jednym modelem kanonicznym, więc nie ma już czego
+  filtrować — kolumna `zrodlo` mówi, kto zrobił dany wpis.
 
-  UWAGA na listę rozwijaną modelu: filtruje ona wiersze po kolumnie `model`.
-  Wybranie modelu innego niż kanoniczny ukryje streszczenia z wtyczki —
-  moduł ostrzega o tym wprost.
+  Pozycje z PEŁNYM układem sekcji (kolumna `streszczenie_pelne`) są oznaczone
+  rombem i można je rozwinąć pod tabelą.
 ===============================================================================
 """
 
 from __future__ import annotations
 
 import datetime as dt
-import time
 
 import streamlit as st
 
@@ -50,8 +39,6 @@ from zestawienie_tygodniowe import (_pasek_sortowania, _pasek_stron,
 
 PODATKI = ["PIT", "CIT", "VAT", "AKCYZA"]
 MAKS_TYGODNI = 104
-BATCH_MAKS = 15  # ile interpretacji streścić za jednym kliknięciem (limit darmowy)
-PRZERWA_S = 3.5  # odstęp między zapytaniami (limit ~20/min darmowej puli)
 
 # Automat streszcza WYŁĄCZNIE interpretacje wydane od tej daty włącznie
 # (data_wyd >= DATA_START). Przeszłe interpretacje są pomijane — start „od teraz”,
@@ -263,33 +250,6 @@ def _brakujace(podatek: str, model: str) -> list[dict]:
     return [r for r in rows if not _sensowne(r.get("s_streszcz"))]
 
 
-def _tekst_dla(ids: list[str]) -> dict:
-    if not ids:
-        return {}
-    rows = _zapytaj(
-        "SELECT id, tekst FROM dokumenty WHERE id = ANY(%s)", (ids,))
-    return {r["id"]: r.get("tekst") or "" for r in rows}
-
-
-def _zapisz_streszczenie(dok_id: str, podatek: str, model: str,
-                         temat: str, streszcz: str, branze: str = "",
-                         przedmiot: str = "") -> None:
-    _wykonaj(
-        """
-        INSERT INTO streszczenia_auto
-            (dokument_id, podatek, model, temat, streszczenie, branze,
-             przedmiot, wygenerowano)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (dokument_id, model) DO UPDATE SET
-            temat=EXCLUDED.temat, streszczenie=EXCLUDED.streszczenie,
-            branze=EXCLUDED.branze, przedmiot=EXCLUDED.przedmiot,
-            wygenerowano=EXCLUDED.wygenerowano
-        """,
-        (dok_id, podatek, model, temat, streszcz, branze, przedmiot,
-         dt.datetime.now().isoformat(timespec="seconds")),
-    )
-
-
 # ---------------------------------------------------------------------------
 # PEŁNE STRESZCZENIA
 # ---------------------------------------------------------------------------
@@ -470,22 +430,9 @@ def _archiwum_font_ostrzezenie() -> None:
 
 
 # ---------------------------------------------------------------------------
-# KLUCZ API
-# ---------------------------------------------------------------------------
-def _api_key() -> str | None:
-    try:
-        return st.secrets["openrouter"]["api_key"]
-    except Exception:
-        try:
-            return st.secrets["OPENROUTER_API_KEY"]
-        except Exception:
-            return None
-
-
-# ---------------------------------------------------------------------------
 # ZAKŁADKA
 # ---------------------------------------------------------------------------
-def _zakladka(podatek: str, model: str, klucz_api: str | None) -> None:
+def _zakladka(podatek: str, model: str) -> None:
     sort_kol, malejaco = _pasek_sortowania(
         f"auto_{podatek}", list(SORT_KOLUMNY.keys()), "Data wydania")
 
@@ -512,26 +459,6 @@ def _zakladka(podatek: str, model: str, klucz_api: str | None) -> None:
     k1.metric("Interpretacji (wszystkie)", total)
     k2.metric("Bez streszczenia", len(brak))
 
-    if brak:
-        if not klucz_api:
-            st.warning(
-                "Brak klucza OpenRouter — dodaj sekcję [openrouter] w Secrets, "
-                "aby streszczać. Poniżej i tak zobaczysz tabelę."
-            )
-        else:
-            do_zrobienia = min(len(brak), BATCH_MAKS)
-            if st.button(
-                f"🤖 Streść brakujące ({do_zrobienia} z {len(brak)}) — model: {model}",
-                key=f"auto_btn_{podatek}", type="primary",
-            ):
-                wsad = brak[:BATCH_MAKS]
-                teksty = _tekst_dla([r["id"] for r in wsad])
-                for r in wsad:
-                    r["tekst"] = teksty.get(r["id"], "")
-                _streszczaj(wsad, podatek, model, klucz_api)
-                st.cache_data.clear()  # świeże streszczenia mają być widoczne
-                st.rerun()
-
     _pasek_pdf(podatek, model)
     st.markdown("")
 
@@ -547,55 +474,17 @@ def _zakladka(podatek: str, model: str, klucz_api: str | None) -> None:
     _pelne_streszczenia(rekordy)
 
     st.caption(
-        f"„Data publikacji” = data dogrania do bazy (pobrania). Sortuj po niej, "
-        f"aby nic nie umknęło przy publikacjach opóźnionych. Streszczenia "
-        f"generowane modelem `{model}` (OpenRouter) — zawsze weryfikuj przed użyciem."
+        "„Data publikacji” = data dogrania do bazy (pobrania). Sortuj po niej, "
+        "aby nic nie umknęło przy publikacjach opóźnionych. Streszczenia są "
+        "generowane maszynowo — zawsze weryfikuj przed użyciem."
     )
-
-
-def _streszczaj(pozycje: list[dict], podatek: str, model: str, klucz_api: str) -> None:
-    pasek = st.progress(0.0, text="Streszczam…")
-    ok, bledy = 0, 0
-    for i, r in enumerate(pozycje, start=1):
-        try:
-            wynik = sopen.streszcz_tekst(
-                r.get("tekst") or "", r["sygnatura"], str(r["data_wyd"]),
-                api_key=klucz_api, model=model, podatek=podatek,
-            )
-            _zapisz_streszczenie(r["id"], podatek, model,
-                                 wynik["temat"], wynik["streszczenie"],
-                                 ", ".join(wynik.get("branze") or []),
-                                 "; ".join(wynik.get("przedmioty") or []))
-            ok += 1
-        except Exception as e:
-            bledy += 1
-            st.warning(f"{r['sygnatura']}: {e}")
-            if "401" in str(e) or "402" in str(e) or "403" in str(e):
-                break  # problem z kluczem/kredytami — nie ma sensu kontynuować
-        pasek.progress(i / len(pozycje), text=f"Streszczam… {i}/{len(pozycje)}")
-        if i < len(pozycje):
-            time.sleep(PRZERWA_S)  # szacunek dla limitu ~20/min
-    pasek.empty()
-    if ok:
-        st.success(f"Zapisano {ok} streszczeń.")
-    if bledy:
-        st.info(f"Nie udało się: {bledy}. Spróbuj ponownie później "
-                f"(limit dzienny/na minutę) lub zmień model.")
 
 
 # ---------------------------------------------------------------------------
 # WEJŚCIE
 # ---------------------------------------------------------------------------
 def pokaz_zestawienie_automat() -> None:
-    st.header("🤖 Zestawienie tygodniowe — Automat (wersja próbna)")
-    st.caption(
-        "Streszczenia generowane wprost z bazy przez OpenRouter (darmowe modele). "
-        "Ta sama tabela co w module 5 — do porównania jakości z obiegiem DOCX."
-    )
-    st.caption(
-        f"Zakres: interpretacje wydane od **{dt.date.fromisoformat(DATA_START):%d.%m.%Y}** "
-        f"włącznie (wcześniejsze są pomijane)."
-    )
+    st.header("📊 Zestawienie tygodniowe")
 
     try:
         _zapewnij_tabele()
@@ -603,34 +492,13 @@ def pokaz_zestawienie_automat() -> None:
         st.error(f"Nie udało się przygotować tabeli streszczeń: {e}")
         return
 
-    klucz_api = _api_key()
-
-    c1, c2 = st.columns([2, 3])
-    with c1:
-        model = st.selectbox("Model (OpenRouter)", options=sopen.MODELE_DO_WYBORU,
-                             index=0, key="auto_model")
-    with c2:
-        st.caption(
-            "Domyślnie `openrouter/free` (auto-router darmowych modeli — odporny "
-            "na rotację oferty). Limit darmowy: ~20 zapytań/min, 50/dobę "
-            "(≥10 kredytów podnosi do ~1000/dobę)."
-        )
-
-    # Lista rozwijana filtruje wiersze po kolumnie `model`. Wybranie modelu
-    # innego niż kanoniczny ukrywa wszystko, co zapisała wtyczka — a to
-    # wygląda jak zniknięcie danych, nie jak zmiana filtra.
-    if model != MODEL_KANONICZNY:
-        st.warning(
-            f"Wybrany model `{model}` różni się od kanonicznego "
-            f"`{MODEL_KANONICZNY}`. Streszczenia zapisane przez wtyczkę "
-            "przeglądarkową są przypisane do modelu kanonicznego, więc "
-            "**nie będą tu widoczne**, dopóki nie wrócisz na niego w liście "
-            "powyżej."
-        )
-
+    # Streszczenia powstają wyłącznie przez ChatGPT (wtyczka / prompt ręczny)
+    # i wszystkie zapisują się pod modelem kanonicznym — nie ma już czego
+    # wybierać, więc lista modeli i przycisk streszczania zniknęły stąd razem
+    # z całą ścieżką OpenRoutera.
     for zakladka_ui, podatek in zip(st.tabs(PODATKI), PODATKI):
         with zakladka_ui:
-            _zakladka(podatek, model, klucz_api)
+            _zakladka(podatek, MODEL_KANONICZNY)
 
 
 if __name__ == "__main__":

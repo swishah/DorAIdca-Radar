@@ -260,11 +260,7 @@ _MODULY = [
 # ewentualnym przywroceniu nie bylo w menu dwoch identycznych pozycji —
 # st.sidebar.radio rozroznia wybory po TRESCI etykiety, wiec duplikat
 # gubilby zaznaczenie.
-#
-# Modul 6 (Zestawienie Tygodniowe — Automat) byl wersja probna do porównania
-# jakosci darmowego OpenRoutera z obiegiem DOCX. Streszczanie zostaje wylacznie
-# przez ChatGPT (prompt reczny) — ukryte, nie usuniete, gdyby wrocic do tematu.
-UKRYTE_MODULY = {"1", "2", "3", "4", "5", "6"}
+UKRYTE_MODULY = {"1", "2", "3", "4", "5"}
 
 # Pozycje bez uprawnien: kłódka + wyszarzenie (są widoczne, ale wejście do
 # nich jest zablokowane także w routingu — dwie warstwy zabezpieczenia).
