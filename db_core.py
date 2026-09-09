@@ -31,7 +31,13 @@ def parametry_z_url(url: str) -> dict:
     password  = user_pass[colon_idx + 1:]
     slash_idx = host_rest.index("/")
     host_port = host_rest[:slash_idx]
-    dbname    = host_rest[slash_idx + 1:]
+    dbname, _, query = host_rest[slash_idx + 1:].partition("?")
+    # sslmode=disable dla Postgresa bez SSL (np. kontener lokalny/NAS) —
+    # bez tego parsowania trafialby literalnie do dbname i psul polaczenie.
+    sslmode = "require"
+    for para in query.split("&"):
+        if para.startswith("sslmode="):
+            sslmode = para.split("=", 1)[1]
     if ":" in host_port:
         host, port = host_port.rsplit(":", 1)
         port = int(port)
@@ -43,7 +49,7 @@ def parametry_z_url(url: str) -> dict:
     return {
         "host": host, "port": port, "dbname": dbname,
         "user": user, "password": password,
-        "sslmode": "require", "connect_timeout": 15,
+        "sslmode": sslmode, "connect_timeout": 15,
     }
 
 
@@ -102,7 +108,9 @@ class SupabaseDB:
                 "dbname":   parametry.get("database", "postgres"),
                 "user":     parametry["user"],
                 "password": parametry["password"],
-                "sslmode":  "require",
+                # "require" domyslnie (Supabase cloud); lokalny/NAS Postgres
+                # bez SSL ustawia to jawnie na "disable" w secrets.toml.
+                "sslmode":  parametry.get("sslmode", "require"),
                 "connect_timeout": 15,
             }
         # Wykrywanie zerwanych polaczen po stronie TCP. Bez tego martwe
