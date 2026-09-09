@@ -54,6 +54,7 @@ def _wczytaj_config_supabase() -> dict:
         "database": os.environ.get("SUPABASE_DB", "postgres"),
         "user":     os.environ["SUPABASE_USER"],
         "password": os.environ["SUPABASE_PASSWORD"],
+        "sslmode":  os.environ.get("SUPABASE_SSLMODE", "require"),
     }
 
 
