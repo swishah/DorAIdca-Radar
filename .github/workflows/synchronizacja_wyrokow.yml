@@ -41,7 +41,13 @@ jobs:
       - name: Zainstaluj zaleznosci
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 lxml psycopg2-binary
+          # Z requirements.txt, NIE z listy wpisanej tutaj. Powod jest konkretny:
+          # 31.07.2026 skrypt dostal `import utils`, a utils.py importuje PyPDF2,
+          # ktorego na tej liscie nie bylo. Zadanie zaczelo padac na imporcie,
+          # zanim dotknelo CBOSA, i padalo tak przez piec kolejnych niedziel.
+          # Lista wpisana recznie zawsze rozjedzie sie z kodem przy nastepnym
+          # nowym imporcie — requirements.txt nie moze.
+          pip install -r requirements.txt
 
       - name: Kalibracja (bez zapisu do bazy)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.tryb == 'kalibracja'
