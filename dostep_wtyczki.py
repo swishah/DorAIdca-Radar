@@ -40,7 +40,17 @@ WAZNOSC_MINUT = 15
 
 
 def _db():
-    return archiwum_supabase._get_db()
+    """Połączenie z bazą — przez auth._db(), nie wprost przez archiwum_supabase.
+
+    auth._db() umie wziąć konfigurację ze zmiennych środowiskowych, gdy nie ma
+    sekretów Streamlita. Dzięki temu generowanie kodów parowania działa także
+    z interfejsu w Dockerze — a to warunek wyłączenia Streamlita, bo kody
+    powstają WYŁĄCZNIE tutaj i bez nich nie da się sparować wtyczki.
+
+    Delegujemy zamiast kopiować tę samą obsługę drugi raz: dwie kopie
+    rozjechałyby się przy pierwszej zmianie sposobu łączenia.
+    """
+    return auth._db()
 
 
 def _skrot(tekst: str) -> str:
