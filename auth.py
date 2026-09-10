@@ -60,8 +60,52 @@ UPRAWNIENIA_SZCZEGOLOWE = {
 
 
 # ---------------------------------------------------------------------------
+_db_zewnetrzna = None
+
+
 def _db():
-    return archiwum_supabase._get_db()
+    """
+    Połączenie z bazą — z Streamlita albo ze zmiennych środowiskowych.
+
+    DLACZEGO DWIE DROGI
+      Ten moduł trzyma CAŁĄ logikę kont: zakładanie, kody aktywacyjne, ich
+      ważność, limit prób, wymogi hasła, role. Dopóki sięgał wyłącznie przez
+      `archiwum_supabase` (czyli przez `st.secrets` i `st.cache_resource`), był
+      użyteczny tylko wewnątrz Streamlita. Nowy interfejs w Dockerze musiałby
+      więc powielić te reguły u siebie — a dwie kopie polityki haseł rozjadą się
+      przy pierwszej zmianie i nikt tego nie zauważy, bo obie „działają".
+
+      Poza Streamlitem `st.secrets` rzuca StreamlitSecretNotFound. Wtedy
+      budujemy połączenie z tych samych zmiennych SUPABASE_*, których używają
+      skrypty wsadowe i kontenery. Wewnątrz Streamlita nic się nie zmienia —
+      pierwsza droga jest nadal pierwsza.
+    """
+    global _db_zewnetrzna
+
+    try:
+        return archiwum_supabase._get_db()
+    except Exception:
+        pass  # brak Streamlita albo jego sekretów — próbujemy środowiska
+
+    if _db_zewnetrzna is None:
+        import os
+        import db_core
+        brakujace = [k for k in ("SUPABASE_HOST", "SUPABASE_PASSWORD")
+                     if not os.environ.get(k)]
+        if brakujace:
+            raise RuntimeError(
+                "Brak konfiguracji bazy: ani sekretów Streamlit, ani zmiennych "
+                + ", ".join(brakujace) + "."
+            )
+        _db_zewnetrzna = db_core.SupabaseDB({
+            "host":     os.environ["SUPABASE_HOST"],
+            "port":     os.environ.get("SUPABASE_PORT", "5432"),
+            "database": os.environ.get("SUPABASE_DB", "postgres"),
+            "user":     os.environ.get("SUPABASE_USER", "postgres"),
+            "password": os.environ["SUPABASE_PASSWORD"],
+            "sslmode":  os.environ.get("SUPABASE_SSLMODE", "require"),
+        })
+    return _db_zewnetrzna
 
 
 def zapewnij_tabele() -> None:
