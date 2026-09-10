@@ -125,6 +125,16 @@ def zapewnij_tabele() -> None:
         )
         """
     )
+    # Kod odzyskiwania — dokładany osobno, bo tabela istnieje już w bazach
+    # produkcyjnych. CREATE TABLE IF NOT EXISTS nie dodaje kolumn do istniejącej
+    # tabeli, więc bez tych ALTER-ów nowa funkcja działałaby wyłącznie na
+    # świeżo założonej bazie i nikt by tego nie zauważył aż do pierwszego użycia.
+    for kolumna, typ in (("kod_odzysk_hash", "TEXT DEFAULT ''"),
+                         ("kod_odzysk_utworzono", "TEXT DEFAULT ''"),
+                         ("kod_odzysk_proby", "INTEGER DEFAULT 0")):
+        _db().wykonaj(
+            f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {kolumna} {typ}")
+
     # Wiersz techniczny dla konta zaszytego DORADCA — samo logowanie z niego
     # NIE korzysta (idzie przez st.secrets, patrz _zaloguj_doradca w app.py),
     # ale parowanie wtyczki (dostep_wtyczki.py) i wtyczka-auth po stronie
@@ -317,6 +327,137 @@ def zmien_haslo(email: str, stare: str, nowe: str) -> None:
         raise ValueError("Nowe hasło musi różnić się od obecnego.")
     _db().wykonaj("UPDATE users SET haslo_hash=%s WHERE email=%s",
                   (_hash(nowe), e))
+
+
+def zmien_role(email: str, nowa_rola: str) -> None:
+    """
+    Nadanie albo odebranie uprawnień administratora.
+
+    Rola 'admin' daje DOKŁADNIE te same możliwości co konto zaszyte DORADCA —
+    patrz UPRAWNIENIA i UPRAWNIENIA_SZCZEGOLOWE wyżej: obie mapy znają tylko
+    'admin' i 'user', a DORADCA jest w nich traktowane jako 'admin'. Nadanie
+    komuś tej roli nie jest więc „prawie adminem" i tak trzeba je traktować.
+
+    Wiersza DORADCA nie ruszamy. To konto techniczne: loguje się przez
+    st.secrets, a jego wiersz w users istnieje wyłącznie po to, by wtyczka
+    miała się z czym sparować. Odebranie mu roli 'admin' zerwałoby parowanie
+    urządzeń, nie odbierając nikomu żadnego realnego dostępu.
+    """
+    e = (email or "").strip().lower()
+    if e == "doradca":
+        raise ValueError("Konta DORADCA nie można zmieniać.")
+    if nowa_rola not in ROLE:
+        raise ValueError(f"Nieznana rola: {nowa_rola}")
+    u = pobierz_uzytkownika(e)
+    if not u:
+        raise ValueError("Konto nie istnieje.")
+
+    # Ostatni admin poza DORADCA — ostrzegamy, ale nie blokujemy: DORADCA zawsze
+    # może nadać rolę z powrotem, więc nie da się tym zamknąć drzwi na amen.
+    _db().wykonaj("UPDATE users SET rola=%s WHERE lower(email)=%s", (nowa_rola, e))
+
+
+# ---------------------------------------------------------------------------
+# KOD ODZYSKIWANIA — awaryjna droga, gdy poczta zawiedzie
+#
+# Kod jest DRUGĄ drogą do ustawienia hasła, obok kodu wysyłanego mailem. Powód
+# istnienia: gdy poczta przestanie działać (wygasłe hasło aplikacji Google,
+# blokada, awaria), konto administratora byłoby nie do odzyskania w ogóle.
+#
+# TRZY OGRANICZENIA, KTÓRE CZYNIĄ TO BEZPIECZNYM
+#   1. Tylko dla roli 'admin'. Zwykły użytkownik odzyskuje hasło mailem, a gdy
+#      poczta leży — prosi administratora. Mniej stałych sekretów w systemie.
+#   2. Trzymany jako hash bcrypt, nie jawnie. Pokazujemy go RAZ, w chwili
+#      wygenerowania. Wyciek bazy nie daje więc gotowego klucza do kont admina —
+#      inaczej kod byłby słabszym odpowiednikiem hasła, zapisanym obok niego.
+#   3. Jednorazowy i z limitem prób. Po użyciu jest kasowany, po 5 błędnych
+#      próbach unieważniany — tak samo jak kod z maila.
+# ---------------------------------------------------------------------------
+KOD_ODZYSK_ZNAKOW = 12
+
+
+def _nowy_kod_odzysk() -> str:
+    """Same cyfry, w grupach po cztery — łatwiej przepisać z kartki."""
+    cyfry = "".join(_secrets.choice("0123456789") for _ in range(KOD_ODZYSK_ZNAKOW))
+    return "-".join(cyfry[i:i + 4] for i in range(0, KOD_ODZYSK_ZNAKOW, 4))
+
+
+def nowy_kod_odzyskiwania(email: str) -> str:
+    """
+    Generuje kod dla konta administratora i zwraca go JAWNIE — jedyny raz.
+
+    Wywołujący ma obowiązek pokazać go użytkownikowi od razu; w bazie ląduje
+    wyłącznie hash. Wygenerowanie nowego unieważnia poprzedni.
+    """
+    e = (email or "").strip().lower()
+    u = pobierz_uzytkownika(e)
+    if not u:
+        raise ValueError("Konto nie istnieje.")
+    if u["rola"] != "admin":
+        raise ValueError("Kod odzyskiwania przysługuje wyłącznie kontom administratora.")
+
+    kod = _nowy_kod_odzysk()
+    _db().wykonaj(
+        """UPDATE users SET kod_odzysk_hash=%s, kod_odzysk_utworzono=%s,
+                            kod_odzysk_proby=0
+           WHERE lower(email)=%s""",
+        (_hash(kod), dt.datetime.now(dt.timezone.utc).isoformat(), e),
+    )
+    return kod
+
+
+def ma_kod_odzyskiwania(email: str) -> str:
+    """Data wygenerowania kodu albo '' — do pokazania w ustawieniach profilu."""
+    u = pobierz_uzytkownika((email or "").strip().lower())
+    if not u or not (u.get("kod_odzysk_hash") or ""):
+        return ""
+    return (u.get("kod_odzysk_utworzono") or "")[:10]
+
+
+def odzyskaj_haslo(email: str, kod: str, nowe_haslo: str) -> None:
+    """
+    Ustawia nowe hasło na podstawie kodu odzyskiwania. Rzuca ValueError.
+
+    Po udanym użyciu kod jest kasowany — jednorazowość jest tu istotna, bo
+    ten kod nie ma daty ważności i inaczej byłby stałym drugim hasłem.
+    """
+    e = (email or "").strip().lower()
+    u = pobierz_uzytkownika(e)
+    if not u or u["status"] != "aktywne":
+        raise ValueError("Konto nieaktywne lub nie istnieje.")
+    if u["rola"] != "admin":
+        raise ValueError("Ta droga jest dostępna wyłącznie dla kont administratora.")
+
+    zapisany = u.get("kod_odzysk_hash") or ""
+    if not zapisany:
+        raise ValueError("To konto nie ma kodu odzyskiwania.")
+
+    if int(u.get("kod_odzysk_proby") or 0) >= KOD_MAKS_PROB:
+        _db().wykonaj("UPDATE users SET kod_odzysk_hash='' WHERE lower(email)=%s", (e,))
+        raise ValueError("Przekroczono liczbę prób — kod został unieważniony. "
+                         "Poproś innego administratora o nowy.")
+
+    # Znormalizowane porównanie: użytkownik przepisuje z kartki i myślniki
+    # albo spacje nie powinny decydować o powodzeniu.
+    podany = re.sub(r"[^0-9]", "", kod or "")
+    wzorzec = "-".join(podany[i:i + 4] for i in range(0, len(podany), 4))
+
+    if not _sprawdz_hash(wzorzec, zapisany):
+        _db().wykonaj(
+            "UPDATE users SET kod_odzysk_proby = COALESCE(kod_odzysk_proby,0)+1 "
+            "WHERE lower(email)=%s", (e,))
+        raise ValueError("Nieprawidłowy kod odzyskiwania.")
+
+    blad = haslo_wymogi(nowe_haslo)
+    if blad:
+        raise ValueError(blad)
+
+    _db().wykonaj(
+        """UPDATE users SET haslo_hash=%s, kod_odzysk_hash='',
+                            kod_odzysk_utworzono='', kod_odzysk_proby=0
+           WHERE lower(email)=%s""",
+        (_hash(nowe_haslo), e),
+    )
 
 
 def dezaktywuj(email: str) -> None:
