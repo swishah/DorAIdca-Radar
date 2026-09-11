@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+.streamlit/secrets.toml
+# Kazdy inny .toml w .streamlit to konfiguracja z haslem. Regula jest szeroka
+# celowo: w tym repo jeden `git add -A` wypchnal juz raz sekrety na publiczny
+# remote, wiec domyslnie ignorujemy wszystko poza jawnymi wyjatkami.
+.streamlit/*.toml
+!.streamlit/config.toml
+!.streamlit/secrets.toml.example
+.env
+
+*.log

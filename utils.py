@@ -13,7 +13,7 @@ from datetime import datetime
 # ---------------------------------------------------------------------------
 # ŚCIEŻKI I STAŁE
 # ---------------------------------------------------------------------------
-FOLDER_DOCELOWY = 'PickPivot_Data'
+FOLDER_DOCELOWY = 'DorAIdca_Radar_Data'
 if not os.path.exists(FOLDER_DOCELOWY):
     os.makedirs(FOLDER_DOCELOWY)
 
@@ -29,6 +29,17 @@ SEARCH_API_URL_BASE = (
 # Rozmiar strony wynikow. Wiekszy = mniej zapytan = mniejsze ryzyko throttlingu
 # i szybciej. MF akceptuje 100.
 ROZMIAR_STRONY = 100
+
+# PAUZA MIEDZY STRONAMI JEDNEGO OKNA.
+#   Bylo 0,2 s, czyli piec zapytan na sekunde. Miesiac VAT-u to ~780 wynikow,
+#   czyli osiem stron — szly w poltorej sekundy, a przy uzupelnianiu dwoch lat
+#   wstecz takich serii bylo dwadziescia kilka pod rzad. 10 wrzesnia 2026 MF
+#   odcielo na tym caly adres biura: nie tylko aplikacje, ale i zwykle wejscie
+#   na Eureke z przegladarki, wszystkim w sieci.
+#
+#   Poltorej sekundy wydluza pobranie miesiaca o kilkanascie sekund. To cena,
+#   ktorej nie warto negocjowac — blokada kosztowala pol dnia.
+PAUZA_MIEDZY_STRONAMI_S = float(os.environ.get("MF_PAUZA_STRONY_S", "1.5"))
 # Twardy limit glebokosci paginacji po stronie MF: API zwykle nie pozwala
 # zejsc glebiej niz ~1000 wynikow (page*size). Gdy total_hits przekracza ten
 # prog, pojedyncze zapytanie NIE zdola pobrac wszystkiego - trzeba podzielic
@@ -613,7 +624,7 @@ def _pobierz_jedno_okno(data_start_str, data_koniec_str, sesja, nazwa_podatku,
             break
 
         page += 1
-        time.sleep(0.2)
+        time.sleep(PAUZA_MIEDZY_STRONAMI_S)
 
     if total_hits is not None and len(dokumenty) < total_hits:
         return dokumenty, "NIEPELNE_POBRANIE", total_hits
@@ -746,6 +757,6 @@ def szukaj_w_api_mf(data_start_str, data_koniec_str, fraza, sesja, nazwa_podatku
                 break
 
         page += 1
-        time.sleep(0.2)
+        time.sleep(PAUZA_MIEDZY_STRONAMI_S)
 
     return dokumenty, "OK"

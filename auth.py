@@ -60,8 +60,52 @@ UPRAWNIENIA_SZCZEGOLOWE = {
 
 
 # ---------------------------------------------------------------------------
+_db_zewnetrzna = None
+
+
 def _db():
-    return archiwum_supabase._get_db()
+    """
+    Połączenie z bazą — z Streamlita albo ze zmiennych środowiskowych.
+
+    DLACZEGO DWIE DROGI
+      Ten moduł trzyma CAŁĄ logikę kont: zakładanie, kody aktywacyjne, ich
+      ważność, limit prób, wymogi hasła, role. Dopóki sięgał wyłącznie przez
+      `archiwum_supabase` (czyli przez `st.secrets` i `st.cache_resource`), był
+      użyteczny tylko wewnątrz Streamlita. Nowy interfejs w Dockerze musiałby
+      więc powielić te reguły u siebie — a dwie kopie polityki haseł rozjadą się
+      przy pierwszej zmianie i nikt tego nie zauważy, bo obie „działają".
+
+      Poza Streamlitem `st.secrets` rzuca StreamlitSecretNotFound. Wtedy
+      budujemy połączenie z tych samych zmiennych SUPABASE_*, których używają
+      skrypty wsadowe i kontenery. Wewnątrz Streamlita nic się nie zmienia —
+      pierwsza droga jest nadal pierwsza.
+    """
+    global _db_zewnetrzna
+
+    try:
+        return archiwum_supabase._get_db()
+    except Exception:
+        pass  # brak Streamlita albo jego sekretów — próbujemy środowiska
+
+    if _db_zewnetrzna is None:
+        import os
+        import db_core
+        brakujace = [k for k in ("SUPABASE_HOST", "SUPABASE_PASSWORD")
+                     if not os.environ.get(k)]
+        if brakujace:
+            raise RuntimeError(
+                "Brak konfiguracji bazy: ani sekretów Streamlit, ani zmiennych "
+                + ", ".join(brakujace) + "."
+            )
+        _db_zewnetrzna = db_core.SupabaseDB({
+            "host":     os.environ["SUPABASE_HOST"],
+            "port":     os.environ.get("SUPABASE_PORT", "5432"),
+            "database": os.environ.get("SUPABASE_DB", "postgres"),
+            "user":     os.environ.get("SUPABASE_USER", "postgres"),
+            "password": os.environ["SUPABASE_PASSWORD"],
+            "sslmode":  os.environ.get("SUPABASE_SSLMODE", "require"),
+        })
+    return _db_zewnetrzna
 
 
 def zapewnij_tabele() -> None:
@@ -80,6 +124,31 @@ def zapewnij_tabele() -> None:
             aktywowano    TEXT DEFAULT ''
         )
         """
+    )
+    # Kod odzyskiwania — dokładany osobno, bo tabela istnieje już w bazach
+    # produkcyjnych. CREATE TABLE IF NOT EXISTS nie dodaje kolumn do istniejącej
+    # tabeli, więc bez tych ALTER-ów nowa funkcja działałaby wyłącznie na
+    # świeżo założonej bazie i nikt by tego nie zauważył aż do pierwszego użycia.
+    for kolumna, typ in (("kod_odzysk_hash", "TEXT DEFAULT ''"),
+                         ("kod_odzysk_utworzono", "TEXT DEFAULT ''"),
+                         ("kod_odzysk_proby", "INTEGER DEFAULT 0")):
+        _db().wykonaj(
+            f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {kolumna} {typ}")
+
+    # Wiersz techniczny dla konta zaszytego DORADCA — samo logowanie z niego
+    # NIE korzysta (idzie przez st.secrets, patrz _zaloguj_doradca w app.py),
+    # ale parowanie wtyczki (dostep_wtyczki.py) i wtyczka-auth po stronie
+    # Supabase wymagają realnego wiersza w users (FK z wtyczka_kody, sprawdzenie
+    # rola/status przy wydawaniu i weryfikacji tokenu). ON CONFLICT DO NOTHING,
+    # żeby nie nadpisywać roli/statusu, gdyby ktoś kiedyś ręcznie je zmienił.
+    # lista_uzytkownikow() celowo pomija ten wiersz w panelu kont.
+    _db().wykonaj(
+        """
+        INSERT INTO users (email, rola, haslo_hash, status, utworzono)
+        VALUES ('DORADCA', 'admin', '', 'aktywne', %s)
+        ON CONFLICT (email) DO NOTHING
+        """,
+        (dt.datetime.now(dt.timezone.utc).isoformat(),),
     )
 
 
@@ -132,9 +201,12 @@ def pobierz_uzytkownika(email: str) -> dict | None:
 
 
 def lista_uzytkownikow() -> list[dict]:
+    # DORADCA ma tu wiersz techniczny (patrz zapewnij_tabele) tylko po to,
+    # żeby dało się z nim sparować wtyczkę — w panelu kont ma pozostać
+    # niewidoczny, tak jak zapowiada ustawienia_systemu.py.
     return _db().wykonaj(
         "SELECT id, email, rola, status, utworzono, aktywowano "
-        "FROM users ORDER BY email", fetch=True,
+        "FROM users WHERE email <> 'DORADCA' ORDER BY email", fetch=True,
     )
 
 
@@ -255,6 +327,256 @@ def zmien_haslo(email: str, stare: str, nowe: str) -> None:
         raise ValueError("Nowe hasło musi różnić się od obecnego.")
     _db().wykonaj("UPDATE users SET haslo_hash=%s WHERE email=%s",
                   (_hash(nowe), e))
+
+
+# ---------------------------------------------------------------------------
+# UPRAWNIENIA PRZYPISANE OSOBIE
+#
+# Dotychczasowy model jest wylacznie ROLOWY (UPRAWNIENIA / UPRAWNIENIA_SZCZEGOLOWE
+# wyzej): uprawnienie wynika z roli, a rola ma tylko dwie wartosci. Sa jednak
+# zadania, ktore chce sie powierzyc KONKRETNEJ osobie, nie dajac jej przy tym
+# praw administratora — na przyklad wgrywanie Dziennika Gazety Prawnej.
+#
+# Te dwa modele celowo sie nie mieszaja: `ma_uprawnienie(rola, nazwa)` odpowiada
+# na pytanie „czy ta ROLA moze", a `ma_uprawnienie_osobiste(email, nazwa)"
+# na „czy TEN CZLOWIEK moze". Administrator ma wszystkie osobiste z urzedu —
+# inaczej trzeba by mu je nadawac pojedynczo, a to zaprzeczenie roli admina.
+# ---------------------------------------------------------------------------
+UPRAWNIENIA_OSOBISTE = {
+    "dgp_wgrywanie": "Wgrywanie Dziennika Gazety Prawnej",
+    "ai_prompt": "Pytanie do Claude'a z dymka na stronie dokumentu",
+}
+
+# ---------------------------------------------------------------------------
+# BIURA (jednostki organizacyjne)
+#
+# Lista mieszka TUTAJ, a nie w ograniczeniu CHECK w bazie: nazwa oddzialu
+# zmienia sie czesciej niz schemat, a przy pieciu wartosciach migracja za
+# kazda literowka byloby placeniem za sztywnosc, ktorej nikt nie potrzebuje.
+#
+# Biuro NIE JEST uprawnieniem. Mowi, gdzie ktos pracuje; o tym, co wolno,
+# rozstrzyga UPRAWNIENIA_OSOBISTE. Te dwie rzeczy trzymamy osobno, bo pierwsza
+# osoba z wyjatkiem od reguly „biuro X moze Y" — a taka zawsze sie znajdzie —
+# kazalaby ten skrot rozplatywac wstecz.
+# ---------------------------------------------------------------------------
+BIURA = [
+    "Biuro Doradztwa Podatkowego, Strategii i Rozwoju",
+    "Zarzad i Administracja",
+    "Biuro Badania Sprawozdan Finansowych i Innych Uslug Bieglego Rewidenta",
+    "Oddzial w Chelmie",
+    "Biuro w Radzyniu Podlaskim",
+]
+
+
+def ustaw_biuro(email: str, biuro: str) -> None:
+    """
+    Przypisuje konto do jednostki. Pusty lancuch odpina.
+
+    Nazwa spoza listy jest bledem, a nie zapisem do poprawienia pozniej:
+    literowka w nazwie oddzialu tworzy jednostke-widmo, do ktorej nikt inny
+    nigdy nie trafi, a filtr „kto jest w Chelmie" po cichu ja pominie.
+    """
+    b = (biuro or "").strip()
+    if b and b not in BIURA:
+        raise ValueError("Nieznane biuro: %s" % b)
+    e = (email or "").strip().lower()
+    if not pobierz_uzytkownika(e):
+        raise ValueError("Konto nie istnieje.")
+    _db().wykonaj("UPDATE users SET biuro = %s WHERE lower(email) = %s", (b, e))
+
+
+def biuro_uzytkownika(email: str) -> str:
+    w = _db().wykonaj(
+        "SELECT biuro FROM users WHERE lower(email) = %s LIMIT 1",
+        ((email or "").strip().lower(),), fetch=True) or []
+    return (w[0]["biuro"] if w else "") or ""
+
+
+def nadaj_uprawnienie(email: str, uprawnienie: str, nadal: str = "") -> None:
+    """Nadaje uprawnienie osobiste. Ponowne nadanie nie jest bledem."""
+    e = (email or "").strip().lower()
+    if uprawnienie not in UPRAWNIENIA_OSOBISTE:
+        raise ValueError("Nieznane uprawnienie: %s" % uprawnienie)
+    if not pobierz_uzytkownika(e):
+        raise ValueError("Konto nie istnieje.")
+    _db().wykonaj(
+        """INSERT INTO uprawnienia_uzytkownika (email, uprawnienie, nadal)
+           VALUES (%s, %s, %s)
+           ON CONFLICT (email, uprawnienie) DO NOTHING""",
+        (e, uprawnienie, (nadal or "").strip().lower()),
+    )
+
+
+def odbierz_uprawnienie(email: str, uprawnienie: str) -> None:
+    _db().wykonaj(
+        "DELETE FROM uprawnienia_uzytkownika "
+        "WHERE lower(email) = %s AND uprawnienie = %s",
+        ((email or "").strip().lower(), uprawnienie),
+    )
+
+
+def uprawnienia_osobiste(email: str) -> set:
+    """Zbior uprawnien nadanych temu kontu (bez tych z roli)."""
+    w = _db().wykonaj(
+        "SELECT uprawnienie FROM uprawnienia_uzytkownika WHERE lower(email) = %s",
+        ((email or "").strip().lower(),), fetch=True) or []
+    return {r["uprawnienie"] for r in w}
+
+
+def ma_uprawnienie_osobiste(email: str, uprawnienie: str, rola: str = "") -> bool:
+    """
+    Czy TEN CZLOWIEK moze zrobic dana rzecz.
+
+    Administrator moze wszystko z urzedu — inaczej trzeba by nadawac mu kazde
+    uprawnienie osobno, co przeczy sensowi tej roli. Poza tym rola sprawdzana
+    jest tu tylko wtedy, gdy wywolujacy ja poda; brak argumentu oznacza
+    sprawdzenie samego nadania.
+    """
+    if rola == "admin":
+        return True
+    e = (email or "").strip().lower()
+    if e == "doradca":          # konto zaszyte ma prawa administratora
+        return True
+    return uprawnienie in uprawnienia_osobiste(e)
+
+
+def kto_ma_uprawnienie(uprawnienie: str) -> list:
+    """Lista adresow z danym uprawnieniem — do panelu zarzadzania."""
+    w = _db().wykonaj(
+        "SELECT email FROM uprawnienia_uzytkownika WHERE uprawnienie = %s "
+        "ORDER BY email", (uprawnienie,), fetch=True) or []
+    return [r["email"] for r in w]
+
+
+def zmien_role(email: str, nowa_rola: str) -> None:
+    """
+    Nadanie albo odebranie uprawnień administratora.
+
+    Rola 'admin' daje DOKŁADNIE te same możliwości co konto zaszyte DORADCA —
+    patrz UPRAWNIENIA i UPRAWNIENIA_SZCZEGOLOWE wyżej: obie mapy znają tylko
+    'admin' i 'user', a DORADCA jest w nich traktowane jako 'admin'. Nadanie
+    komuś tej roli nie jest więc „prawie adminem" i tak trzeba je traktować.
+
+    Wiersza DORADCA nie ruszamy. To konto techniczne: loguje się przez
+    st.secrets, a jego wiersz w users istnieje wyłącznie po to, by wtyczka
+    miała się z czym sparować. Odebranie mu roli 'admin' zerwałoby parowanie
+    urządzeń, nie odbierając nikomu żadnego realnego dostępu.
+    """
+    e = (email or "").strip().lower()
+    if e == "doradca":
+        raise ValueError("Konta DORADCA nie można zmieniać.")
+    if nowa_rola not in ROLE:
+        raise ValueError(f"Nieznana rola: {nowa_rola}")
+    u = pobierz_uzytkownika(e)
+    if not u:
+        raise ValueError("Konto nie istnieje.")
+
+    # Ostatni admin poza DORADCA — ostrzegamy, ale nie blokujemy: DORADCA zawsze
+    # może nadać rolę z powrotem, więc nie da się tym zamknąć drzwi na amen.
+    _db().wykonaj("UPDATE users SET rola=%s WHERE lower(email)=%s", (nowa_rola, e))
+
+
+# ---------------------------------------------------------------------------
+# KOD ODZYSKIWANIA — awaryjna droga, gdy poczta zawiedzie
+#
+# Kod jest DRUGĄ drogą do ustawienia hasła, obok kodu wysyłanego mailem. Powód
+# istnienia: gdy poczta przestanie działać (wygasłe hasło aplikacji Google,
+# blokada, awaria), konto administratora byłoby nie do odzyskania w ogóle.
+#
+# TRZY OGRANICZENIA, KTÓRE CZYNIĄ TO BEZPIECZNYM
+#   1. Tylko dla roli 'admin'. Zwykły użytkownik odzyskuje hasło mailem, a gdy
+#      poczta leży — prosi administratora. Mniej stałych sekretów w systemie.
+#   2. Trzymany jako hash bcrypt, nie jawnie. Pokazujemy go RAZ, w chwili
+#      wygenerowania. Wyciek bazy nie daje więc gotowego klucza do kont admina —
+#      inaczej kod byłby słabszym odpowiednikiem hasła, zapisanym obok niego.
+#   3. Jednorazowy i z limitem prób. Po użyciu jest kasowany, po 5 błędnych
+#      próbach unieważniany — tak samo jak kod z maila.
+# ---------------------------------------------------------------------------
+KOD_ODZYSK_ZNAKOW = 12
+
+
+def _nowy_kod_odzysk() -> str:
+    """Same cyfry, w grupach po cztery — łatwiej przepisać z kartki."""
+    cyfry = "".join(_secrets.choice("0123456789") for _ in range(KOD_ODZYSK_ZNAKOW))
+    return "-".join(cyfry[i:i + 4] for i in range(0, KOD_ODZYSK_ZNAKOW, 4))
+
+
+def nowy_kod_odzyskiwania(email: str) -> str:
+    """
+    Generuje kod dla konta administratora i zwraca go JAWNIE — jedyny raz.
+
+    Wywołujący ma obowiązek pokazać go użytkownikowi od razu; w bazie ląduje
+    wyłącznie hash. Wygenerowanie nowego unieważnia poprzedni.
+    """
+    e = (email or "").strip().lower()
+    u = pobierz_uzytkownika(e)
+    if not u:
+        raise ValueError("Konto nie istnieje.")
+    if u["rola"] != "admin":
+        raise ValueError("Kod odzyskiwania przysługuje wyłącznie kontom administratora.")
+
+    kod = _nowy_kod_odzysk()
+    _db().wykonaj(
+        """UPDATE users SET kod_odzysk_hash=%s, kod_odzysk_utworzono=%s,
+                            kod_odzysk_proby=0
+           WHERE lower(email)=%s""",
+        (_hash(kod), dt.datetime.now(dt.timezone.utc).isoformat(), e),
+    )
+    return kod
+
+
+def ma_kod_odzyskiwania(email: str) -> str:
+    """Data wygenerowania kodu albo '' — do pokazania w ustawieniach profilu."""
+    u = pobierz_uzytkownika((email or "").strip().lower())
+    if not u or not (u.get("kod_odzysk_hash") or ""):
+        return ""
+    return (u.get("kod_odzysk_utworzono") or "")[:10]
+
+
+def odzyskaj_haslo(email: str, kod: str, nowe_haslo: str) -> None:
+    """
+    Ustawia nowe hasło na podstawie kodu odzyskiwania. Rzuca ValueError.
+
+    Po udanym użyciu kod jest kasowany — jednorazowość jest tu istotna, bo
+    ten kod nie ma daty ważności i inaczej byłby stałym drugim hasłem.
+    """
+    e = (email or "").strip().lower()
+    u = pobierz_uzytkownika(e)
+    if not u or u["status"] != "aktywne":
+        raise ValueError("Konto nieaktywne lub nie istnieje.")
+    if u["rola"] != "admin":
+        raise ValueError("Ta droga jest dostępna wyłącznie dla kont administratora.")
+
+    zapisany = u.get("kod_odzysk_hash") or ""
+    if not zapisany:
+        raise ValueError("To konto nie ma kodu odzyskiwania.")
+
+    if int(u.get("kod_odzysk_proby") or 0) >= KOD_MAKS_PROB:
+        _db().wykonaj("UPDATE users SET kod_odzysk_hash='' WHERE lower(email)=%s", (e,))
+        raise ValueError("Przekroczono liczbę prób — kod został unieważniony. "
+                         "Poproś innego administratora o nowy.")
+
+    # Znormalizowane porównanie: użytkownik przepisuje z kartki i myślniki
+    # albo spacje nie powinny decydować o powodzeniu.
+    podany = re.sub(r"[^0-9]", "", kod or "")
+    wzorzec = "-".join(podany[i:i + 4] for i in range(0, len(podany), 4))
+
+    if not _sprawdz_hash(wzorzec, zapisany):
+        _db().wykonaj(
+            "UPDATE users SET kod_odzysk_proby = COALESCE(kod_odzysk_proby,0)+1 "
+            "WHERE lower(email)=%s", (e,))
+        raise ValueError("Nieprawidłowy kod odzyskiwania.")
+
+    blad = haslo_wymogi(nowe_haslo)
+    if blad:
+        raise ValueError(blad)
+
+    _db().wykonaj(
+        """UPDATE users SET haslo_hash=%s, kod_odzysk_hash='',
+                            kod_odzysk_utworzono='', kod_odzysk_proby=0
+           WHERE lower(email)=%s""",
+        (_hash(nowe_haslo), e),
+    )
 
 
 def dezaktywuj(email: str) -> None:

@@ -3,6 +3,15 @@
 streszczacz_openrouter.py — Klient OpenRouter do streszczania interpretacji.
 NIEZALEŻNY od Streamlit (można go użyć też w skrypcie GitHub Actions).
 
+STAN OBECNY: wywoływanie OpenRoutera (streszcz_tekst i wszystko, co go używa —
+moduł 6 „Zestawienie Tygodniowe — Automat” oraz streszczanie_auto.py/workflow
+GitHub Actions) zostało WYŁĄCZONE. Streszczanie idzie wyłącznie przez ChatGPT
+(prompt ręczny, Edge Functions gpt-*). Plik ZOSTAJE w repo, bo BRANZE,
+PRZEDMIOTY i _waliduj_branze/_waliduj_przedmioty są nadal importowane przez
+inne, niepowiązane moduły (zestawienie_tygodniowe.py, panel_uzytkownika.py,
+wyszukiwarka_klasyfikacji.py, zasil_taksonomie.py) — usunięcie pliku popsułoby
+je wszystkie. Nie przenoszę tych stałych gdzie indziej bez osobnej decyzji.
+
 API OpenRouter jest zgodne z OpenAI: POST na /chat/completions z nagłówkiem
 Authorization: Bearer <klucz>. Domyślny model to auto-router "openrouter/free",
 który sam dobiera dostępny darmowy model — odporny na rotację darmowej oferty.
@@ -222,6 +231,7 @@ def _polaczenie_z_env():
             "database": os.environ.get("SUPABASE_DB", "postgres"),
             "user": os.environ["SUPABASE_USER"],
             "password": os.environ["SUPABASE_PASSWORD"],
+            "sslmode": os.environ.get("SUPABASE_SSLMODE", "require"),
         })
     return None
 

@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./.streamlit/secrets.toml:/app/.streamlit/secrets.toml:ro
+    env_file:
+      - .env
+    restart: unless-stopped
+
+networks:
+  default:
+    name: doraidca-net
+    external: true
