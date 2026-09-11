@@ -21,9 +21,9 @@ on:
   workflow_dispatch:
     inputs:
       tryb:
-        description: 'zwykly — wszystkie podatki; podatek — pierwsze pobranie podatku dodanego z EUREKI; slownik — lista ustaw z EUREKI'
+        description: 'zwykly — wszystkie podatki; podatek — pierwsze pobranie podatku dodanego z EUREKI; slownik — lista ustaw z EUREKI; sprawdz — diagnostyka dodanego podatku (nic nie zapisuje)'
         type: choice
-        options: [zwykly, podatek, slownik]
+        options: [zwykly, podatek, slownik, sprawdz]
         default: zwykly
       podatek:
         description: 'Tylko w trybie podatek: skrot dodany w Dockerze, np. CUKIER'

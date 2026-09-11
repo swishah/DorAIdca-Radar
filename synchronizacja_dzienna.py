@@ -33,6 +33,9 @@ TRYBY (zmienna TRYB_SYNC — wejscie "tryb" przy recznym uruchomieniu workflow)
            wykonawca w Dockerze zleca zaraz po dodaniu podatku.
   slownik  bez interpretacji: lista ustaw ze slownika przepisow EUREKI do tabeli
            eureka_przepisy. Z niej administrator wybiera nowy podatek.
+  sprawdz  diagnostyka, NIC nie zapisuje: ile interpretacji ma w EUREKA ustawa
+           dodanego podatku (PODATEK_SYNC) w ostatnim roku i ile z nich baza ma
+           juz pod innym podatkiem (MF przypisuje interpretacje do kilku ustaw).
 
 Wymagane zmienne srodowiskowe:
   SUPABASE_HOST, SUPABASE_PORT, SUPABASE_DB, SUPABASE_USER, SUPABASE_PASSWORD
@@ -58,7 +61,8 @@ import utils
 MAKS_PROB_CALEGO_SYNC   = 3
 ODSTEP_MIEDZY_PROBAMI_S = 600  # 10 minut
 
-TRYBY = ("zwykly", "podatek", "slownik")
+TRYBY = ("zwykly", "podatek", "slownik", "sprawdz")
+SPRAWDZ_DNI = 365
 # Pierwsze pobranie nowego podatku siega do jego daty startu, ale nie dalej
 # niz tyle dni wstecz — ponowne uruchomienie po miesiacach nie zamieni sie
 # w wielomiesieczne pobieranie (od tego jest codzienne okno).
@@ -109,6 +113,37 @@ def _pobierz_slownik(db) -> None:
     zmienione = db_core.zapisz_slownik_przepisow(db, pozycje)
     print(f"Slownik przepisow w chmurze: {len(pozycje)} pozycji "
           f"(nowych albo zmienionych: {zmienione}).")
+
+
+def _sprawdz(db, dodane: list) -> None:
+    """Tryb "sprawdz": sama lista z MF (sygnatury i daty, bez tresci) i jej
+    porownanie z baza. Nic nie zapisuje."""
+    kod = (os.environ.get("PODATEK_SYNC") or "").strip().upper()
+    if kod not in dodane:
+        raise SystemExit(f"Podatek '{kod}' nie jest aktywnym podatkiem dodanym z EUREKI.")
+    data_do = datetime.now()
+    data_od = data_do - timedelta(days=SPRAWDZ_DNI)
+    with requests.Session() as sesja:
+        lista, status = utils.pobierz_wszystko_z_okresu(
+            data_od.strftime("%Y-%m-%d"), data_do.strftime("%Y-%m-%d"), sesja, kod,
+            utils.KODY_PRZEPISOW[kod], log_fn=print)
+    ids = [d["id"] for d in lista]
+    w_bazie = {r["id"]: r["podatek"] for r in db.wykonaj(
+        "SELECT id, podatek FROM dokumenty WHERE id = ANY(%s)", (ids,), fetch=True)} if ids else {}
+    print(f"\n[{kod}] EUREKA, {data_od.date()} — {data_do.date()}: {len(lista)} interpretacji "
+          f"(status listy: {status})")
+    pod_innym = {}
+    for pid, pod in w_bazie.items():
+        pod_innym[pod] = pod_innym.get(pod, 0) + 1
+    print(f"[{kod}] juz w bazie: {len(w_bazie)} — "
+          + (", ".join(f"{p}: {n}" for p, n in sorted(pod_innym.items())) or "zadnej"))
+    print(f"[{kod}] brak w bazie: {len(ids) - len(w_bazie)}")
+    miesiace = {}
+    for d in lista:
+        miesiace[d["data"][:7]] = miesiace.get(d["data"][:7], 0) + 1
+    print(f"[{kod}] wg miesiecy: " + ", ".join(f"{m}: {n}" for m, n in sorted(miesiace.items())))
+    for d in sorted(lista, key=lambda x: x["data"], reverse=True)[:25]:
+        print(f"    {d['data']}  {d['sygnatura']:<40} {w_bazie.get(d['id'], '— brak w bazie')}")
 
 
 def _okna(tryb: str, dodane: list) -> tuple:
@@ -170,6 +205,9 @@ def main():
     if dodane:
         print("Podatki dodane z EUREKI: " + ", ".join(
             f"{k} (ustawa nr {utils.KODY_PRZEPISOW[k]}, od {utils.data_start(k)})" for k in dodane))
+    if tryb == "sprawdz":
+        _sprawdz(db, dodane)
+        return
     okna, opis_okresu = _okna(tryb, dodane)
     for pod, (od, do) in okna.items():
         print(f"Okno {pod}: {od.date()} — {do.date()}")
