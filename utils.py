@@ -109,6 +109,33 @@ def data_start(podatek: str | None = None) -> str:
         return DATA_START_DOMYSLNA
     return DATY_START_PODATKU.get(podatek.upper(), DATA_START_DOMYSLNA)
 
+
+# ---------------------------------------------------------------------------
+# PODATKI DODAWANE Z EUREKI
+# ---------------------------------------------------------------------------
+# Piec podatkow wyzej jest wpisanych w kod. Kolejne dopisuje administrator
+# w module Harmonogram w Dockerze: wybiera ustawe ze slownika przepisow EUREKI
+# i nadaje jej skrot (np. CUKIER). Wpis trafia do tabeli `podatki_eureka`
+# w chmurze, a skrypty GitHub Actions dokladaja go tutaj — od tej chwili taki
+# podatek idzie ta sama sciezka co PIT: te same zapytania do MF z filtrem
+# PRZEPISY, ta sama weryfikacja kompletnosci, ta sama tabela `dokumenty`.
+PODATKI_WBUDOWANE = tuple(KODY_PRZEPISOW)
+
+
+def dolacz_podatki_eureka(wpisy) -> list:
+    """Dopisuje podatki z tabeli podatki_eureka do KODY_PRZEPISOW
+    i DATY_START_PODATKU. Wbudowanych nigdy nie nadpisuje — wpis o skrocie
+    PIT nie przestawi pobierania PIT na inna ustawe. Zwraca dolaczone skroty."""
+    dolaczone = []
+    for w in wpisy:
+        kod = str(w.get("kod") or "").strip().upper()
+        if not kod or kod in PODATKI_WBUDOWANE:
+            continue
+        KODY_PRZEPISOW[kod] = int(w["przepis_id"])
+        DATY_START_PODATKU[kod] = str(w["data_start"])[:10]
+        dolaczone.append(kod)
+    return dolaczone
+
 MIESIACE_PL   = [
     "Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec",
     "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień"
@@ -760,3 +787,101 @@ def szukaj_w_api_mf(data_start_str, data_koniec_str, fraza, sesja, nazwa_podatku
         time.sleep(PAUZA_MIEDZY_STRONAMI_S)
 
     return dokumenty, "OK"
+
+
+# ---------------------------------------------------------------------------
+# SLOWNIK PRZEPISOW EUREKI — lista ustaw do wyboru przy dodawaniu podatku
+# ---------------------------------------------------------------------------
+# Te same zapytania, ktore wysyla sama wyszukiwarka eureka.mf.gov.pl, gdy
+# otwiera okno „Przepisy" (odczytane z jej kodu): numer slownika po kodzie
+# PRZEPISY, potem jego pierwszy poziom — ustawy i rozporzadzenia, bez
+# artykulow. Numery z pierwszego poziomu to dokladnie te, ktore stoja
+# w KODY_PRZEPISOW (29903 = ustawa o PIT) i ktore przyjmuje filtr PRZEPISY.
+# Dwa zapytania na cale pobranie — dla MF niezauwazalne.
+API_EUREKA = "https://eureka.mf.gov.pl/api/public/v1"
+
+
+def _pobierz_json(sesja, url, params=None, timeout=30):
+    """GET do API EUREKI z tymi samymi naglowkami i ponowieniami co wyszukiwanie."""
+    global _ua_idx
+    ostatni = ""
+    for proba in range(3):
+        try:
+            ua = _UA_LIST[_ua_idx % len(_UA_LIST)]
+            _ua_idx += 1
+            r = sesja.get(url, params=params, timeout=timeout, headers={
+                "User-Agent": ua,
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8",
+                "Referer": "https://eureka.mf.gov.pl/",
+            })
+            if r.status_code == 200:
+                return r.json()
+            ostatni = f"HTTP {r.status_code}"
+            if r.status_code in (429, 403, 503):
+                time.sleep(15 * (proba + 1))
+                continue
+            break
+        except (requests.exceptions.RequestException, ValueError) as e:
+            ostatni = type(e).__name__
+            time.sleep(5)
+    raise RuntimeError(f"EUREKA {url}: {ostatni}")
+
+
+def _pozycja_przepisu(p):
+    if not isinstance(p, dict) or p.get("id") is None:
+        return None
+    nazwa = str(p.get("wartosc") or p.get("wartoscTekstowa") or p.get("opis") or "").strip()
+    if not nazwa:
+        return None
+    return {"id": int(p["id"]), "nazwa": nazwa, "kod": str(p.get("kod") or ""),
+            "status": str(p.get("status") or "")}
+
+
+def pobierz_slownik_przepisow(sesja, log_fn=print) -> list:
+    """Pierwszy poziom slownika PRZEPISY: [{"id", "nazwa", "kod", "status"}]."""
+    slownik = _pobierz_json(sesja, f"{API_EUREKA}/slowniki/slownik-by-kod/PRZEPISY")
+    sid = slownik.get("id") if isinstance(slownik, dict) else None
+    if not sid:
+        raise RuntimeError(f"EUREKA nie podala numeru slownika PRZEPISY: {str(slownik)[:200]}")
+    log_fn(f"Slownik PRZEPISY ma w EUREKA numer {sid}.")
+    time.sleep(PAUZA_MIEDZY_STRONAMI_S)
+
+    parametry = {"sid": sid, "isFirstLevel": "true",
+                 "sort": "kolejnosc,wartoscTekstowa", "status": "AKTUALNY,WYGASZONY"}
+    try:
+        # Okno „Przepisy" w wyszukiwarce: caly pierwszy poziom jedna odpowiedzia.
+        dane = _pobierz_json(sesja, f"{API_EUREKA}/pozycje-slownika/wyszukiwarka/all",
+                             params=parametry, timeout=90)
+        surowe = dane.get("content", []) if isinstance(dane, dict) else (dane or [])
+    except RuntimeError as e:
+        # Zapasowo lista stronicowana — ta, ktora wyszukiwarka wypelnia pole
+        # przewijanej listy. Wolniej (strona po stronie), ale to samo.
+        log_fn(f"Pelna lista niedostepna ({e}) — pobieram strona po stronie.")
+        surowe, strona = [], 0
+        while strona < 60:
+            time.sleep(PAUZA_MIEDZY_STRONAMI_S)
+            dane = _pobierz_json(sesja, f"{API_EUREKA}/pozycje-slownika/wyszukiwarka",
+                                 params={"sid": sid, "isFirstLevel": "true", "size": 100,
+                                         "page": strona, "sort": "kolejnosc,asc"})
+            porcja = (dane or {}).get("content") or []
+            surowe += porcja
+            strona += 1
+            if not porcja or len(surowe) >= int((dane or {}).get("totalElements") or 0):
+                break
+
+    pozycje, widziane = [], set()
+    for p in surowe:
+        w = _pozycja_przepisu(p)
+        if w and w["id"] not in widziane:
+            widziane.add(w["id"])
+            pozycje.append(w)
+    # Kontrola: wbudowana piatka musi byc na tej liscie — inaczej to nie jest
+    # slownik, z ktorego bierze filtr wyszukiwarki, i lepiej niczego nie zapisac.
+    brakuje = [k for k in PODATKI_WBUDOWANE if KODY_PRZEPISOW[k] not in widziane]
+    log_fn(f"Ustaw i innych aktow na pierwszym poziomie: {len(pozycje)}"
+           + (f"; brak wbudowanych: {', '.join(brakuje)}" if brakuje else "; wbudowana piatka jest"))
+    if len(brakuje) == len(PODATKI_WBUDOWANE):
+        raise RuntimeError("Lista z EUREKI nie zawiera zadnej z ustaw wbudowanych podatkow "
+                           "— to nie ten slownik; nic nie zapisuje.")
+    return pozycje

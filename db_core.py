@@ -273,6 +273,29 @@ SCHEMA_SQL = [
         szczegoly     TEXT DEFAULT ''
     )""",
     "CREATE INDEX IF NOT EXISTS idx_s1 ON historia_synchronizacji(uruchomiono)",
+
+    # ── PODATKI DODAWANE Z EUREKI ──
+    # Pisze wylacznie administrator w Dockerze (modul Harmonogram); synchronizacja
+    # przenosi wpisy tutaj, a przebiegi GitHub Actions pobieraja te podatki
+    # razem z wbudowana piatka. kod trafia do dokumenty.podatek, jak "PIT".
+    """CREATE TABLE IF NOT EXISTS podatki_eureka (
+        kod           TEXT PRIMARY KEY,
+        nazwa         TEXT NOT NULL DEFAULT '',
+        przepis_id    INTEGER NOT NULL,      -- numer ustawy w slowniku PRZEPISY EUREKI
+        przepis_nazwa TEXT NOT NULL DEFAULT '',
+        data_start    DATE NOT NULL,         -- dzien dodania minus tydzien
+        aktywny       BOOLEAN NOT NULL DEFAULT TRUE,
+        dodal         TEXT NOT NULL DEFAULT '',
+        dodano        TIMESTAMPTZ NOT NULL DEFAULT now())""",
+
+    # ── SLOWNIK PRZEPISOW EUREKI — ustawy do wyboru przy dodawaniu podatku ──
+    # Pisze GitHub Actions (tryb "slownik"); Docker dostaje kopie przez synchronizacje.
+    """CREATE TABLE IF NOT EXISTS eureka_przepisy (
+        id       INTEGER PRIMARY KEY,
+        nazwa    TEXT NOT NULL,
+        kod      TEXT NOT NULL DEFAULT '',
+        status   TEXT NOT NULL DEFAULT '',
+        pobrano  TIMESTAMPTZ NOT NULL DEFAULT now())""",
 ]
 
 
@@ -317,6 +340,36 @@ def pobierz_rekordy_z_archiwum(db: SupabaseDB, podatek=None, rok=None, miesiac=N
 def pobierz_id_z_archiwum(db: SupabaseDB) -> set:
     rows = db.wykonaj("SELECT id FROM dokumenty", fetch=True)
     return {r["id"] for r in rows}
+
+
+# ---------------------------------------------------------------------------
+# PODATKI DODAWANE Z EUREKI I SLOWNIK PRZEPISOW
+# ---------------------------------------------------------------------------
+def pobierz_podatki_eureka(db: SupabaseDB) -> list:
+    """Aktywne podatki dodane w Dockerze, w kolejnosci dodania."""
+    return db.wykonaj(
+        "SELECT kod, nazwa, przepis_id, przepis_nazwa, data_start::text AS data_start "
+        "FROM podatki_eureka WHERE aktywny ORDER BY dodano, kod", fetch=True)
+
+
+def zapisz_slownik_przepisow(db: SupabaseDB, pozycje: list) -> int:
+    """Lista ustaw z EUREKI. Wiersz bez zmian zostaje nietkniety (pobrano stoi),
+    wiec synchronizacja do Dockera przenosi tylko to, co naprawde nowe."""
+    if not pozycje:
+        return 0
+    przed = db.wykonaj("SELECT count(*) AS n, max(pobrano) AS t FROM eureka_przepisy",
+                       fetch=True)[0]
+    db.wykonaj_wiele(
+        """INSERT INTO eureka_przepisy (id, nazwa, kod, status) VALUES %s
+           ON CONFLICT (id) DO UPDATE SET nazwa = EXCLUDED.nazwa, kod = EXCLUDED.kod,
+             status = EXCLUDED.status, pobrano = now()
+           WHERE (eureka_przepisy.nazwa, eureka_przepisy.kod, eureka_przepisy.status)
+                 IS DISTINCT FROM (EXCLUDED.nazwa, EXCLUDED.kod, EXCLUDED.status)""",
+        [(p["id"], p["nazwa"], p["kod"], p["status"]) for p in pozycje])
+    zmienione = db.wykonaj(
+        "SELECT count(*) AS n FROM eureka_przepisy WHERE %s::timestamptz IS NULL OR pobrano > %s",
+        (przed["t"], przed["t"]), fetch=True)[0]["n"]
+    return int(zmienione)
 
 
 def oznacz_kombinacje(db: SupabaseDB, podatek: str, rok: int, miesiac: int):

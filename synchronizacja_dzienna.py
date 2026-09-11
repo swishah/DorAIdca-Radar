@@ -25,24 +25,44 @@ zlapania pozniej opublikowanych dokumentow, bez koniecznosci
 przechowywania dodatkowego stanu miedzy uruchomieniami. Kosztem jest
 wieksza liczba zapytan do API MF przy kazdym codziennym uruchomieniu.
 
+TRYBY (zmienna TRYB_SYNC — wejscie "tryb" przy recznym uruchomieniu workflow)
+  zwykly   wbudowana piatka i podatki dodane z EUREKI, ruchome okno. Tak ida
+           wszystkie przebiegi z harmonogramu.
+  podatek  JEDEN podatek dodany z EUREKI (PODATEK_SYNC, np. CUKIER) od jego daty
+           startu — dnia dodania minus tydzien. Pierwsze pobranie, ktore
+           wykonawca w Dockerze zleca zaraz po dodaniu podatku.
+  slownik  bez interpretacji: lista ustaw ze slownika przepisow EUREKI do tabeli
+           eureka_przepisy. Z niej administrator wybiera nowy podatek.
+
 Wymagane zmienne srodowiskowe:
   SUPABASE_HOST, SUPABASE_PORT, SUPABASE_DB, SUPABASE_USER, SUPABASE_PASSWORD
   GMAIL_ADRES, GMAIL_HASLO_APLIKACJI, EMAIL_ODBIORCA
 
 Uruchomienie reczne (test):
   python synchronizacja_dzienna.py
+  TRYB_SYNC=podatek PODATEK_SYNC=CUKIER python synchronizacja_dzienna.py
 """
 
 import os
 import sys
 import time
+from datetime import datetime, timedelta
+
+import requests
 
 import db_core
 import raport_silnik as silnik
+import utils
 
 
 MAKS_PROB_CALEGO_SYNC   = 3
 ODSTEP_MIEDZY_PROBAMI_S = 600  # 10 minut
+
+TRYBY = ("zwykly", "podatek", "slownik")
+# Pierwsze pobranie nowego podatku siega do jego daty startu, ale nie dalej
+# niz tyle dni wstecz — ponowne uruchomienie po miesiacach nie zamieni sie
+# w wielomiesieczne pobieranie (od tego jest codzienne okno).
+MAKS_OKNO_PODATKU_DNI = 31
 
 
 def _wczytaj_config_supabase() -> dict:
@@ -64,9 +84,11 @@ def _czy_wymaga_ponowienia(wyniki: list) -> bool:
     return any(w["status"] in statusy_wymagajace_retry for w in wyniki)
 
 
-def _wykonaj_probe(db, data_od, data_do, opis_okresu, numer_proby) -> list:
+def _wykonaj_probe(db, okna, opis_okresu, numer_proby) -> list:
+    """okna: {podatek: (data_od, data_do)} — podatek dodany z EUREKI ma okno
+    przyciete do swojej daty startu."""
     wyniki = []
-    for pod in silnik.PODATKI_WSZYSTKIE:
+    for pod, (data_od, data_do) in okna.items():
         print(f"\n--- {pod} (proba {numer_proby}) ---")
         wynik = silnik.generuj_raport_dla_podatku(
             db, pod, data_od, data_do, opis_okresu, log_fn=print, generuj_plik=False
@@ -80,9 +102,47 @@ def _wykonaj_probe(db, data_od, data_do, opis_okresu, numer_proby) -> list:
     return wyniki
 
 
+def _pobierz_slownik(db) -> None:
+    """Tryb "slownik": lista ustaw z EUREKI do tabeli eureka_przepisy."""
+    with requests.Session() as sesja:
+        pozycje = utils.pobierz_slownik_przepisow(sesja, log_fn=print)
+    zmienione = db_core.zapisz_slownik_przepisow(db, pozycje)
+    print(f"Slownik przepisow w chmurze: {len(pozycje)} pozycji "
+          f"(nowych albo zmienionych: {zmienione}).")
+
+
+def _okna(tryb: str, dodane: list) -> tuple:
+    """({podatek: (data_od, data_do)}, opis_okresu) dla trybu zwykly albo podatek."""
+    if tryb == "podatek":
+        kod = (os.environ.get("PODATEK_SYNC") or "").strip().upper()
+        if kod not in dodane:
+            raise SystemExit(f"Podatek '{kod}' nie jest aktywnym podatkiem dodanym z EUREKI "
+                             f"(aktywne: {', '.join(dodane) or 'brak'}) — nic do zrobienia.")
+        data_do = datetime.now()
+        start = datetime.strptime(utils.data_start(kod), "%Y-%m-%d")
+        data_od = max(start, data_do - timedelta(days=MAKS_OKNO_PODATKU_DNI - 1))
+        opis = f"{data_od.strftime('%d.%m')} — {data_do.strftime('%d.%m.%Y')}"
+        return {kod: (data_od, data_do)}, opis
+
+    data_od, data_do, opis = silnik.zakres_synchronizacji()
+    okna = {pod: (data_od, data_do) for pod in silnik.PODATKI_WSZYSTKIE}
+    for pod in dodane:
+        okno = silnik.okno_podatku(pod, data_od, data_do)
+        if okno:
+            okna[pod] = okno
+        else:
+            print(f"[{pod}] pobieranie rusza od {utils.data_start(pod)} — pomijam.")
+    return okna, opis
+
+
 def main():
+    tryb = (os.environ.get("TRYB_SYNC") or "zwykly").strip().lower()
+    if tryb not in TRYBY:
+        raise SystemExit(f"Nieznany tryb '{tryb}' — dozwolone: {', '.join(TRYBY)}.")
+
     print("=" * 70)
-    print("DorAIdca Radar — Codzienna Synchronizacja Interpretacji (3:00)")
+    print("DorAIdca Radar — Codzienna Synchronizacja Interpretacji"
+          + ("" if tryb == "zwykly" else f"  [tryb: {tryb}]"))
     print("=" * 70)
 
     # Okno synchronizacji sterowane z workflow: częste przebiegi trzymają wąskie
@@ -97,18 +157,27 @@ def main():
         except ValueError:
             print(f"Nieprawidłowe OKNO_SYNCHRONIZACJI_DNI='{okno_env}' — używam domyślnego.")
 
-    data_od, data_do, opis_okresu = silnik.zakres_synchronizacji()
-    print(f"Okno: {data_od.date()} — {data_do.date()} ({opis_okresu})")
-
     config = _wczytaj_config_supabase()
     db = db_core.SupabaseDB(config)
     db.inicjalizuj_schemat()
     print("Polaczenie z Supabase OK.")
 
+    if tryb == "slownik":
+        _pobierz_slownik(db)
+        return
+
+    dodane = silnik.dolacz_podatki_eureka(db)
+    if dodane:
+        print("Podatki dodane z EUREKI: " + ", ".join(
+            f"{k} (ustawa nr {utils.KODY_PRZEPISOW[k]}, od {utils.data_start(k)})" for k in dodane))
+    okna, opis_okresu = _okna(tryb, dodane)
+    for pod, (od, do) in okna.items():
+        print(f"Okno {pod}: {od.date()} — {do.date()}")
+
     wyniki = None
     proba = 1
     for proba in range(1, MAKS_PROB_CALEGO_SYNC + 1):
-        wyniki = _wykonaj_probe(db, data_od, data_do, opis_okresu, proba)
+        wyniki = _wykonaj_probe(db, okna, opis_okresu, proba)
 
         if not _czy_wymaga_ponowienia(wyniki):
             print(f"\nProba {proba}: wszystko OK, konczy petle retry.")
@@ -126,7 +195,9 @@ def main():
     # ── POWIADOMIENIE MAILOWE — tylko na wyznaczonym przebiegu ──────────────
     # Przy kilku przebiegach dziennie mail-podsumowanie wysyłamy raz (nocny
     # przebieg ustawia SYNC_MAIL=1); pozostałe są ciche, żeby nie zasypać skrzynki.
-    wyslij_mail = os.environ.get("SYNC_MAIL", "1") == "1"
+    # Pierwsze pobranie nowego podatku nie wysyla dziennego podsumowania —
+    # to nie jest dzienny przebieg, a jego wynik widac w module Harmonogram.
+    wyslij_mail = tryb == "zwykly" and os.environ.get("SYNC_MAIL", "1") == "1"
     gmail_adres = os.environ.get("GMAIL_ADRES")
     gmail_haslo = os.environ.get("GMAIL_HASLO_APLIKACJI")
     odbiorca    = os.environ.get("EMAIL_ODBIORCA", gmail_adres)
@@ -166,6 +237,7 @@ def main():
             szczegoly = ""
             if wer and wer["status"] == "NIEZGODNOSC":
                 szczegoly = f"MF={wer['liczba_w_mf']}, archiwum={wer['liczba_w_archiwum']}"
+            data_od, data_do = okna[w["podatek"]]
             db_core.zapisz_historie_synchronizacji(
                 db,
                 data_od=data_od.strftime("%Y-%m-%d"),
