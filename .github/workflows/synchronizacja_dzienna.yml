@@ -16,8 +16,19 @@ on:
     - cron: '30 4 * * *'
     - cron: '30 21 * * *'
 
-  # Mozliwosc recznego uruchomienia z zakladki Actions (do testow)
+  # Reczne uruchomienie: z zakladki Actions albo z modulu Harmonogram w Dockerze
+  # (wykonawca). Przebiegi z harmonogramu nie maja wejsc — ida w trybie zwykly.
   workflow_dispatch:
+    inputs:
+      tryb:
+        description: 'zwykly — wszystkie podatki; podatek — pierwsze pobranie podatku dodanego z EUREKI; slownik — lista ustaw z EUREKI; sprawdz — diagnostyka dodanego podatku (nic nie zapisuje)'
+        type: choice
+        options: [zwykly, podatek, slownik, sprawdz]
+        default: zwykly
+      podatek:
+        description: 'Tylko w trybie podatek: skrot dodany w Dockerze, np. CUKIER'
+        type: string
+        default: ''
 
 jobs:
   synchronizuj:
@@ -48,6 +59,10 @@ jobs:
           GMAIL_ADRES:            ${{ secrets.GMAIL_ADRES }}
           GMAIL_HASLO_APLIKACJI:  ${{ secrets.GMAIL_HASLO_APLIKACJI }}
           EMAIL_ODBIORCA:         ${{ secrets.EMAIL_ODBIORCA }}
+          # Wejscia trafiaja do skryptu przez zmienne, nigdy wprost do polecenia
+          # powloki — skrot podatku sprawdza sam skrypt.
+          TRYB_SYNC:              ${{ inputs.tryb || 'zwykly' }}
+          PODATEK_SYNC:           ${{ inputs.podatek || '' }}
         run: python synchronizacja_dzienna.py
 
       - name: Podsumowanie

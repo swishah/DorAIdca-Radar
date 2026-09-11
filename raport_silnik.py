@@ -25,6 +25,34 @@ import utils
 
 PODATKI_WSZYSTKIE = ["PIT", "CIT", "VAT", "AKCYZA", "PCC"]
 
+
+def dolacz_podatki_eureka(db) -> list:
+    """
+    Podatki dodane przez administratora w Dockerze (tabela podatki_eureka),
+    dopisane do utils.KODY_PRZEPISOW i DATY_START_PODATKU — od tej chwili
+    generuj_raport_dla_podatku obsluguje je jak PIT. Zwraca ich skroty.
+    Blad odczytu nie zatrzymuje pobierania wbudowanej piatki.
+    """
+    try:
+        return utils.dolacz_podatki_eureka(db_core.pobierz_podatki_eureka(db))
+    except Exception as e:
+        print(f"OSTRZEZENIE: nie udalo sie odczytac podatkow dodanych z EUREKI: {e}")
+        return []
+
+
+def okno_podatku(podatek: str, data_od: datetime, data_do: datetime):
+    """
+    Okno przyciete do daty startu podatku dodanego z EUREKI — przed nia nic
+    nie zbieramy (dzien dodania minus tydzien). None, gdy okno konczy sie
+    przed startem. Wbudowanej piatki nie przycina.
+    """
+    if podatek in utils.PODATKI_WBUDOWANE:
+        return data_od, data_do
+    start = datetime.strptime(utils.data_start(podatek), "%Y-%m-%d")
+    if start > data_do:
+        return None
+    return max(data_od, start), data_do
+
 # Ruchome okno codziennej synchronizacji (zakres_synchronizacji nizej).
 # Bylo 3 dni; zwiekszone na podstawie obserwacji, ze MF czasem publikuje
 # interpretacje z data wsteczna spoza tego zakresu, co dawalo ubytki w

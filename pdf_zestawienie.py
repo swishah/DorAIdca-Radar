@@ -230,9 +230,12 @@ def generuj(rekordy: list[dict], pon: dt.date, *,
     else:
         # Przy zestawieniu jednego podatku nagłówki sekcji są zbędne —
         # wszystkie pozycje należą do tej samej grupy, a tytuł już o tym mówi.
+        # Podatki dodane z EUREKI (np. CUKIER) ida po wbudowanej piatce —
+        # inaczej ich pozycje wypadlyby z PDF-u tak samo, jak kiedys PCC.
+        kolejnosc = PODATKI + sorted({(r.get("podatek") or "") for r in rekordy} - set(PODATKI))
         grupy = ([(podatek, rekordy)] if podatek else
                  [(p, [r for r in rekordy if (r.get("podatek") or "") == p])
-                  for p in PODATKI])
+                  for p in kolejnosc])
 
         for nazwa_grupy, grupa in grupy:
             if not grupa:
