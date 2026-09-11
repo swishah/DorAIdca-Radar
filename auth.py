@@ -329,6 +329,125 @@ def zmien_haslo(email: str, stare: str, nowe: str) -> None:
                   (_hash(nowe), e))
 
 
+# ---------------------------------------------------------------------------
+# UPRAWNIENIA PRZYPISANE OSOBIE
+#
+# Dotychczasowy model jest wylacznie ROLOWY (UPRAWNIENIA / UPRAWNIENIA_SZCZEGOLOWE
+# wyzej): uprawnienie wynika z roli, a rola ma tylko dwie wartosci. Sa jednak
+# zadania, ktore chce sie powierzyc KONKRETNEJ osobie, nie dajac jej przy tym
+# praw administratora — na przyklad wgrywanie Dziennika Gazety Prawnej.
+#
+# Te dwa modele celowo sie nie mieszaja: `ma_uprawnienie(rola, nazwa)` odpowiada
+# na pytanie „czy ta ROLA moze", a `ma_uprawnienie_osobiste(email, nazwa)"
+# na „czy TEN CZLOWIEK moze". Administrator ma wszystkie osobiste z urzedu —
+# inaczej trzeba by mu je nadawac pojedynczo, a to zaprzeczenie roli admina.
+# ---------------------------------------------------------------------------
+UPRAWNIENIA_OSOBISTE = {
+    "dgp_wgrywanie": "Wgrywanie Dziennika Gazety Prawnej",
+    "ai_prompt": "Pytanie do Claude'a z dymka na stronie dokumentu",
+}
+
+# ---------------------------------------------------------------------------
+# BIURA (jednostki organizacyjne)
+#
+# Lista mieszka TUTAJ, a nie w ograniczeniu CHECK w bazie: nazwa oddzialu
+# zmienia sie czesciej niz schemat, a przy pieciu wartosciach migracja za
+# kazda literowka byloby placeniem za sztywnosc, ktorej nikt nie potrzebuje.
+#
+# Biuro NIE JEST uprawnieniem. Mowi, gdzie ktos pracuje; o tym, co wolno,
+# rozstrzyga UPRAWNIENIA_OSOBISTE. Te dwie rzeczy trzymamy osobno, bo pierwsza
+# osoba z wyjatkiem od reguly „biuro X moze Y" — a taka zawsze sie znajdzie —
+# kazalaby ten skrot rozplatywac wstecz.
+# ---------------------------------------------------------------------------
+BIURA = [
+    "Biuro Doradztwa Podatkowego, Strategii i Rozwoju",
+    "Zarzad i Administracja",
+    "Biuro Badania Sprawozdan Finansowych i Innych Uslug Bieglego Rewidenta",
+    "Oddzial w Chelmie",
+    "Biuro w Radzyniu Podlaskim",
+]
+
+
+def ustaw_biuro(email: str, biuro: str) -> None:
+    """
+    Przypisuje konto do jednostki. Pusty lancuch odpina.
+
+    Nazwa spoza listy jest bledem, a nie zapisem do poprawienia pozniej:
+    literowka w nazwie oddzialu tworzy jednostke-widmo, do ktorej nikt inny
+    nigdy nie trafi, a filtr „kto jest w Chelmie" po cichu ja pominie.
+    """
+    b = (biuro or "").strip()
+    if b and b not in BIURA:
+        raise ValueError("Nieznane biuro: %s" % b)
+    e = (email or "").strip().lower()
+    if not pobierz_uzytkownika(e):
+        raise ValueError("Konto nie istnieje.")
+    _db().wykonaj("UPDATE users SET biuro = %s WHERE lower(email) = %s", (b, e))
+
+
+def biuro_uzytkownika(email: str) -> str:
+    w = _db().wykonaj(
+        "SELECT biuro FROM users WHERE lower(email) = %s LIMIT 1",
+        ((email or "").strip().lower(),), fetch=True) or []
+    return (w[0]["biuro"] if w else "") or ""
+
+
+def nadaj_uprawnienie(email: str, uprawnienie: str, nadal: str = "") -> None:
+    """Nadaje uprawnienie osobiste. Ponowne nadanie nie jest bledem."""
+    e = (email or "").strip().lower()
+    if uprawnienie not in UPRAWNIENIA_OSOBISTE:
+        raise ValueError("Nieznane uprawnienie: %s" % uprawnienie)
+    if not pobierz_uzytkownika(e):
+        raise ValueError("Konto nie istnieje.")
+    _db().wykonaj(
+        """INSERT INTO uprawnienia_uzytkownika (email, uprawnienie, nadal)
+           VALUES (%s, %s, %s)
+           ON CONFLICT (email, uprawnienie) DO NOTHING""",
+        (e, uprawnienie, (nadal or "").strip().lower()),
+    )
+
+
+def odbierz_uprawnienie(email: str, uprawnienie: str) -> None:
+    _db().wykonaj(
+        "DELETE FROM uprawnienia_uzytkownika "
+        "WHERE lower(email) = %s AND uprawnienie = %s",
+        ((email or "").strip().lower(), uprawnienie),
+    )
+
+
+def uprawnienia_osobiste(email: str) -> set:
+    """Zbior uprawnien nadanych temu kontu (bez tych z roli)."""
+    w = _db().wykonaj(
+        "SELECT uprawnienie FROM uprawnienia_uzytkownika WHERE lower(email) = %s",
+        ((email or "").strip().lower(),), fetch=True) or []
+    return {r["uprawnienie"] for r in w}
+
+
+def ma_uprawnienie_osobiste(email: str, uprawnienie: str, rola: str = "") -> bool:
+    """
+    Czy TEN CZLOWIEK moze zrobic dana rzecz.
+
+    Administrator moze wszystko z urzedu — inaczej trzeba by nadawac mu kazde
+    uprawnienie osobno, co przeczy sensowi tej roli. Poza tym rola sprawdzana
+    jest tu tylko wtedy, gdy wywolujacy ja poda; brak argumentu oznacza
+    sprawdzenie samego nadania.
+    """
+    if rola == "admin":
+        return True
+    e = (email or "").strip().lower()
+    if e == "doradca":          # konto zaszyte ma prawa administratora
+        return True
+    return uprawnienie in uprawnienia_osobiste(e)
+
+
+def kto_ma_uprawnienie(uprawnienie: str) -> list:
+    """Lista adresow z danym uprawnieniem — do panelu zarzadzania."""
+    w = _db().wykonaj(
+        "SELECT email FROM uprawnienia_uzytkownika WHERE uprawnienie = %s "
+        "ORDER BY email", (uprawnienie,), fetch=True) or []
+    return [r["email"] for r in w]
+
+
 def zmien_role(email: str, nowa_rola: str) -> None:
     """
     Nadanie albo odebranie uprawnień administratora.
