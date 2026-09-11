@@ -23,6 +23,13 @@ on:
         description: 'Strumienie (tylko tryb pelny), np. 1,2,3'
         required: false
         default: '1,2,3'
+      dni_metadanych:
+        description: >-
+          Ile dni wstecz dla strumienia metadanych. Puste = 10 (normalny bieg).
+          Podnies TYLKO do nadrobienia zaleglosci: gdy zadanie stalo dluzej niz
+          10 dni, powstaje dziura, ktorej zwykly przebieg nigdy nie zobaczy.
+        required: false
+        default: ''
 
 jobs:
   synchronizuj-wyroki:
@@ -41,7 +48,13 @@ jobs:
       - name: Zainstaluj zaleznosci
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 lxml psycopg2-binary
+          # Z requirements.txt, NIE z listy wpisanej tutaj. Powod jest konkretny:
+          # 31.07.2026 skrypt dostal `import utils`, a utils.py importuje PyPDF2,
+          # ktorego na tej liscie nie bylo. Zadanie zaczelo padac na imporcie,
+          # zanim dotknelo CBOSA, i padalo tak przez piec kolejnych niedziel.
+          # Lista wpisana recznie zawsze rozjedzie sie z kodem przy nastepnym
+          # nowym imporcie — requirements.txt nie moze.
+          pip install -r requirements.txt
 
       - name: Kalibracja (bez zapisu do bazy)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.tryb == 'kalibracja'
@@ -50,6 +63,7 @@ jobs:
       - name: Synchronizacja pelna (reczna)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.tryb == 'pelny'
         env:
+          WYROKI_OKNO_METADANE_DNI: ${{ github.event.inputs.dni_metadanych }}
           SUPABASE_HOST:     ${{ secrets.SUPABASE_HOST }}
           SUPABASE_PORT:     ${{ secrets.SUPABASE_PORT }}
           SUPABASE_DB:       ${{ secrets.SUPABASE_DB }}
@@ -60,6 +74,7 @@ jobs:
       - name: Synchronizacja pelna (harmonogram niedzielny)
         if: github.event_name == 'schedule'
         env:
+          WYROKI_OKNO_METADANE_DNI: ${{ github.event.inputs.dni_metadanych }}
           SUPABASE_HOST:     ${{ secrets.SUPABASE_HOST }}
           SUPABASE_PORT:     ${{ secrets.SUPABASE_PORT }}
           SUPABASE_DB:       ${{ secrets.SUPABASE_DB }}
