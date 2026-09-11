@@ -274,9 +274,20 @@ def generuj_raport_dla_podatku(
         )
 
         if not rekordy:
+            # BLAD API TO NIE JEST PUSTY OKRES.
+            #   Do 10 wrzesnia 2026 obie sytuacje wychodzily stad jako
+            #   "BRAK_DOKUMENTOW". Gdy MF odcielo adres biura, uzupelnianie
+            #   CIT i VAT przemielilo 45 miesiecy, kazdy meldujac "brak
+            #   dokumentow" — i przez kilka godzin wygladalo to jak brak
+            #   danych po stronie MF, a nie jak blokada. Statusu pobierania
+            #   nie wolno tu zgubic: to jedyne miejsce, ktore wie, czy
+            #   pytanie w ogole doszlo.
+            status_pustego = ("BRAK_DOKUMENTOW"
+                              if status_pobierania in ("OK", None)
+                              else status_pobierania)
             return {
                 "podatek": podatek, "liczba_dok": 0, "plik_bytes": None,
-                "nowych_pobranych": nowych, "status": "BRAK_DOKUMENTOW",
+                "nowych_pobranych": nowych, "status": status_pustego,
                 "weryfikacja": None,
             }
 
