@@ -5,8 +5,8 @@ interpretacji indywidualnych. Uruchamiany przez GitHub Actions codziennie
 o 3:00 w nocy.
 
 Co robi:
-  1. Wyznacza ruchome okno ostatnich 10 dni (patrz OKNO_SYNCHRONIZACJI_DNI
-     w raport_silnik.py).
+  1. Wyznacza ruchome okno: 5 dni w przebiegach rutynowych, 30 dni w niedzielnym
+     (workflow ustawia OKNO_SYNCHRONIZACJI_DNI; patrz raport_silnik.py).
   2. Dla kazdego podatku (PIT, CIT, VAT, AKCYZA, PCC) sprawdza API MF dla tego
      okna i dociaga do bazy WYLACZNIE nowe dokumenty (duplikaty pomijane
      automatycznie przez ON CONFLICT DO NOTHING w warstwie zapisu).
@@ -14,16 +14,20 @@ Co robi:
   4. Wysyla krotkie, codzienne powiadomienie mailowe z podsumowaniem.
   5. Zapisuje wpis w historii synchronizacji (widoczny w aplikacji).
 
-Dlaczego okno 10 dni, nie 1 dzien: MF czasem publikuje interpretacje z data
-wsteczna, i to z opoznieniem wiekszym niz kilka dni (np. interpretacja z
-10.04 pojawia sie w API dopiero kilkanascie dni pozniej). Okno 3-dniowe,
-uzywane wczesniej, dawalo obserwowalne ubytki w archiwum — dokumenty
-istniejace w Eurece, ale publikowane "za pozno", zeby zlapac je w tak
-waskim oknie. Przy oknie 10-dniowym kazdy dzien jest sprawdzany do
-10-krotnie w kolejnych uruchomieniach, co daje znacznie wyzsza szanse
-zlapania pozniej opublikowanych dokumentow, bez koniecznosci
-przechowywania dodatkowego stanu miedzy uruchomieniami. Kosztem jest
-wieksza liczba zapytan do API MF przy kazdym codziennym uruchomieniu.
+Dlaczego okno ruchome, a nie jeden dzien: MF czasem publikuje interpretacje
+z data wsteczna, i to z opoznieniem wiekszym niz kilka dni (np. interpretacja
+z 10.04 pojawia sie w API dopiero kilkanascie dni pozniej). Okno 3-dniowe,
+uzywane wczesniej, dawalo obserwowalne ubytki w archiwum.
+
+Dlaczego 5 dni na co dzien, a 30 raz w tygodniu (wrzesien 2026): przy dwoch
+przebiegach dziennie kazdy dzien wpada w kontrole dziesieciokrotnie, a to,
+co MF opublikuje z kilkutygodniowym poslizgiem, lapie niedzielny przebieg.
+Wczesniejsze okno 10-dniowe przy kazdym uruchomieniu bylo najwiekszym
+stalym obciazeniem, jakie robimy API MF — a blokada adresu, ktora spotkala
+biuro 10 wrzesnia, kosztuje wiecej niz kilka godzin dodatkowego opoznienia
+w wylapaniu spoznionej publikacji. Duplikaty i tak sa pomijane przy zapisie
+(ON CONFLICT DO NOTHING), wiec powtorne sprawdzanie tych samych dni jest
+bezpieczne.
 
 TRYBY (zmienna TRYB_SYNC — wejscie "tryb" przy recznym uruchomieniu workflow)
   zwykly   wbudowana piatka i podatki dodane z EUREKI, ruchome okno. Tak ida
@@ -180,11 +184,13 @@ def main():
           + ("" if tryb == "zwykly" else f"  [tryb: {tryb}]"))
     print("=" * 70)
 
-    # Okno synchronizacji sterowane z workflow: częste przebiegi trzymają wąskie
-    # okno (świeżość), a jeden nocny sięga szerzej (łapie publikacje opóźnione —
-    # np. interpretacje wydane ponownie po wyroku, wpadające do Eureki z kilku-
-    # tygodniowym poślizgiem). Brak zmiennej = zachowanie domyślne z raport_silnik.
-    okno_env = os.environ.get("OKNO_SYNCHRONIZACJI_DNI")
+    # Okno synchronizacji sterowane z workflow: rutynowe przebiegi trzymają
+    # wąskie okno (5 dni), a niedzielny sięga szerzej (30 dni — łapie
+    # publikacje opóźnione, np. interpretacje wydane ponownie po wyroku,
+    # wpadające do Eureki z kilkutygodniowym poślizgiem). OKNO_RECZNE ma
+    # pierwszeństwo: to wejście „okno" przy ręcznym uruchomieniu.
+    # Brak obu = zachowanie domyślne z raport_silnik.
+    okno_env = os.environ.get("OKNO_RECZNE") or os.environ.get("OKNO_SYNCHRONIZACJI_DNI")
     if okno_env:
         try:
             silnik.OKNO_SYNCHRONIZACJI_DNI = int(okno_env)

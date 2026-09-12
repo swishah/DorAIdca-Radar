@@ -45,6 +45,9 @@ from reportlab.platypus import (HRFlowable, PageBreak, Paragraph,
                                 SimpleDocTemplate, Spacer, Table, TableStyle)
 
 import paleta
+# Podział pełnego streszczenia na sekcje — ten sam co na stronie DorAIdca
+# i w chmurce wtyczki (METRYKA.naBloki), więc PDF wygląda jak ekran.
+import streszczenie_bloki
 
 # Rejestrację fontów bierzemy z modułu Archiwum, zamiast powielać listę ścieżek
 # kandydatów. Powielona rozjechałaby się przy pierwszej poprawce, a objawem
@@ -145,8 +148,26 @@ def _na_akapity(tekst: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # GENEROWANIE
 # ---------------------------------------------------------------------------
+def _bloki_pdf(pelne: str, s_sekcja, s_tresc, s_punkt) -> list:
+    """Pełne streszczenie po sekcjach: nagłówek wersalikami w kolorze marki
+    (jak w chmurce i na stronie), akapity i punktory zamiast jednej ściany.
+    Dawny podział po pustych liniach sklejał nagłówek starszych streszczeń
+    z pierwszym zdaniem sekcji, a listę — w jedną linię."""
+    wynik = []
+    for blok in streszczenie_bloki.na_bloki(pelne):
+        if blok["naglowek"]:
+            wynik.append(Paragraph(streszczenie_bloki.oznacz(blok["naglowek"].upper()), s_sekcja))
+        for rodzaj, tresc in streszczenie_bloki.elementy(blok["tresc"]):
+            if rodzaj == "ul":
+                wynik.extend(Paragraph(streszczenie_bloki.oznacz(t), s_punkt, bulletText="•")
+                             for t in tresc)
+            else:
+                wynik.append(Paragraph(streszczenie_bloki.oznacz(tresc), s_tresc))
+    return wynik
+
+
 def generuj(rekordy: list[dict], pon: dt.date, *,
-            z_pelnymi: bool = False, podatek: str = "") -> bytes:
+            z_pelnymi: bool = False, podatek: str = "", w_toku: bool = False) -> bytes:
     """
     Buduje PDF zestawienia tygodniowego.
 
@@ -156,6 +177,8 @@ def generuj(rekordy: list[dict], pon: dt.date, *,
     z_pelnymi: czy dołączyć pełne streszczenia (znacznie grubszy dokument)
     podatek: gdy podany, tytuł mówi wprost o jednym podatku i pomijamy
              nagłówki sekcji — przy jednorodnej liście byłyby zbędne
+    w_toku: tydzień jeszcze trwa — podtytuł mówi to wprost, z chwilą
+            wygenerowania, żeby niepełna lista nie udawała kompletnej
     """
     regularny, pogrubiony, _ = _fonty()
     p = paleta.paleta_pdf()
@@ -203,6 +226,13 @@ def generuj(rekordy: list[dict], pon: dt.date, *,
                              leading=13.5, spaceAfter=6, alignment=4,
                              textColor=colors.HexColor(p["text"]))
     s_brak = ParagraphStyle("Brak", parent=s_tresc, textColor=ostrzezenie)
+    # Pełne streszczenie: nagłówek sekcji jak w chmurce — mały, pogrubiony,
+    # wersalikami, w kolorze marki; punkty z wcięciem.
+    s_sekcja = ParagraphStyle("Sekcja", fontName=pogrubiony, fontSize=7.8,
+                              textColor=akcent, spaceBefore=7, spaceAfter=2.5,
+                              leading=10)
+    s_punkt = ParagraphStyle("Punkt", parent=s_tresc, leftIndent=11, bulletIndent=2,
+                             bulletFontName=regularny, spaceAfter=2.5, alignment=0)
     s_stopka = ParagraphStyle("Stopka", fontName=regularny, fontSize=8,
                               textColor=podtekst, spaceBefore=4, leading=11)
 
@@ -221,6 +251,8 @@ def generuj(rekordy: list[dict], pon: dt.date, *,
     if opoznione:
         czesci.append(f"w tym {opoznione} z wcześniejszą datą wydania")
     czesci.append("wybór po dacie publikacji w bazie")
+    if w_toku:
+        czesci.append(f"tydzień w toku — stan na {dt.datetime.now():%d.%m.%Y, %H:%M}")
     e.append(Paragraph(" · ".join(czesci), s_podtytul))
 
     if not rekordy:
@@ -278,8 +310,7 @@ def generuj(rekordy: list[dict], pon: dt.date, *,
 
                 if z_pelnymi and (r.get("streszczenie_pelne") or "").strip():
                     e.append(Spacer(1, 4))
-                    for akapit in _na_akapity(r["streszczenie_pelne"]):
-                        e.append(Paragraph(akapit, s_tresc))
+                    e.extend(_bloki_pdf(r["streszczenie_pelne"], s_sekcja, s_tresc, s_punkt))
 
                 if r.get("link"):
                     e.append(Paragraph(

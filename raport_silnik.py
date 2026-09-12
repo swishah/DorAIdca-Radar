@@ -54,6 +54,9 @@ def okno_podatku(podatek: str, data_od: datetime, data_do: datetime):
     return max(data_od, start), data_do
 
 # Ruchome okno codziennej synchronizacji (zakres_synchronizacji nizej).
+# WARTOSC DOMYSLNA — dla Dockera w trybie "mf" (crontab wola ten skrypt bez
+# zmiennej). GitHub Actions ustawia ja jawnie: 5 dni w przebiegach rutynowych,
+# 30 w niedzielnym (patrz .github/workflows/synchronizacja_dzienna.yml).
 # Bylo 3 dni; zwiekszone na podstawie obserwacji, ze MF czasem publikuje
 # interpretacje z data wsteczna spoza tego zakresu, co dawalo ubytki w
 # archiwum (dokument istnieje w Eurece, ale wpadl "za pozno", zeby zlapac

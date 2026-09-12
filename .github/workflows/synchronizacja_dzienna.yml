@@ -3,18 +3,23 @@ name: Synchronizacja dzienna
 on:
   schedule:
     # GitHub Actions cron dziala w UTC i NIE zna stref czasowych.
-    # Ponizsze godziny sa ustawione pod czas LETNI (Polska = UTC+2):
-    #   04:30 UTC -> 06:30 PL
-    #   21:30 UTC -> 23:30 PL
-    # Zima (UTC+1) wszystko przesunie sie o godzine pozniej wzgledem zegara
-    # polskiego: 05:30 i 22:30. Swiadomie akceptujemy to przesuniecie -
-    # alternatywa (dwie pary cronow + odsiewanie w skrypcie) komplikuje
-    # kod bardziej, niz jest warta.
+    # Godziny ustawione pod czas LETNI (Polska = UTC+2); zima wszystko
+    # przesuwa sie o godzine pozniej wzgledem zegara polskiego. Swiadomie:
+    # alternatywa (dwie pary cronow + odsiewanie w skrypcie) komplikuje kod
+    # bardziej, niz jest warta.
     #
-    # Dwa przebiegi zamiast jednego: rano zbiera to, co MF opublikowalo w nocy,
-    # wieczorem to, co doszlo w ciagu dnia roboczego.
-    - cron: '30 4 * * *'
-    - cron: '30 21 * * *'
+    # RUTYNA: WASKIE OKNO, RAZ W TYGODNIU SZEROKIE
+    #   Kazdy dzien jest sprawdzany przy kazdym przebiegu, wiec przy oknie
+    #   5-dniowym i dwoch przebiegach dziennie dzien wpada w kontrole
+    #   dziesieciokrotnie. Interpretacje publikowane przez MF z kilkutygodniowym
+    #   poslizgiem lapie niedzielny przebieg z oknem 30 dni.
+    #
+    #   Powod jest jeden: mniej zapytan o listy do MF przy tej samej
+    #   szczelnosci. Codzienne przemielanie dziesieciu dni dla kazdego podatku
+    #   bylo najwiekszym stalym obciazeniem, jakie im robimy.
+    - cron: '30 4 * * 1-6'   # 06:30 PL, poniedzialek-sobota — okno 5 dni
+    - cron: '30 21 * * *'    # 23:30 PL, codziennie          — okno 5 dni
+    - cron: '30 1 * * 0'     # 03:30 PL, niedziela           — okno 30 dni
 
   # Reczne uruchomienie: z zakladki Actions albo z modulu Harmonogram w Dockerze
   # (wykonawca). Przebiegi z harmonogramu nie maja wejsc — ida w trybie zwykly.
@@ -27,6 +32,10 @@ on:
         default: zwykly
       podatek:
         description: 'Tylko w trybie podatek: skrot dodany w Dockerze, np. CUKIER'
+        type: string
+        default: ''
+      okno:
+        description: 'Okno w dniach wstecz (puste = 5; niedzielny przebieg i tak bierze 30)'
         type: string
         default: ''
 
@@ -63,6 +72,10 @@ jobs:
           # powloki — skrot podatku sprawdza sam skrypt.
           TRYB_SYNC:              ${{ inputs.tryb || 'zwykly' }}
           PODATEK_SYNC:           ${{ inputs.podatek || '' }}
+          # Okno rutynowe 5 dni; niedzielny przebieg siega 30 dni wstecz.
+          OKNO_SYNCHRONIZACJI_DNI: ${{ github.event.schedule == '30 1 * * 0' && '30' || '5' }}
+          # Reczne uruchomienie moze podac swoje okno — skrypt woli te wartosc.
+          OKNO_RECZNE:            ${{ inputs.okno || '' }}
         run: python synchronizacja_dzienna.py
 
       - name: Podsumowanie
