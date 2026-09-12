@@ -104,6 +104,31 @@ BRANZE = [
 # a model dostaje listę w prompcie w tej samej kolejności. Dlatego tabela
 # przechowuje kolumnę `kolejnosc`.
 PRZEDMIOTY = {
+    # Opłata od środków spożywczych („opłata cukrowa", ustawa o zdrowiu
+    # publicznym) — podatek dodany z EUREKI, patrz modul Harmonogram.
+    "CUKIER": [
+        "przedmiot opłaty — napoje z dodatkiem cukrów",
+        "przedmiot opłaty — słodziki, kofeina i tauryna",
+        "wyłączenia (wyroby medyczne, suplementy, żywność specjalnego przeznaczenia)",
+        "napoje z udziałem soku owocowego lub warzywnego",
+        "wyroby mleczne i napoje na bazie mleka",
+        "roztwory węglowodanowo-elektrolitowe i napoje izotoniczne",
+        "syropy, koncentraty i napoje w proszku",
+        "podmiot zobowiązany — sprzedaż do punktów sprzedaży detalicznej",
+        "podmiot zobowiązany — sprzedaż detaliczna producenta lub importera",
+        "zamawiający napój (marka własna, produkcja na zlecenie)",
+        "sprzedaż hurtowa a detaliczna — kwalifikacja odbiorcy",
+        "wysokość i sposób obliczenia opłaty",
+        "maksymalna wysokość opłaty (1,20 zł za litr)",
+        "moment powstania obowiązku zapłaty",
+        "eksport i wewnątrzwspólnotowa dostawa napojów",
+        "informacja CUK-1, termin i korekty",
+        "dodatkowa opłata sankcyjna",
+        "zwrot, nadpłata i zwrot towaru",
+        "ewidencja i dokumentowanie sprzedaży napojów",
+        "inne zagadnienia opłaty cukrowej",
+    ],
+
     "CIT": [
         "estoński CIT (ryczałt od dochodów spółek)", "podatek u źródła (WHT)",
         "ceny transferowe i podmioty powiązane", "koszty finansowania dłużniczego",
