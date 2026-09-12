@@ -1,12 +1,19 @@
 name: Alarm awarii (nadzor)
 
 on:
+  # HARMONOGRAM WYLACZONY 12.09.2026 na zyczenie wlasciciela — awarie sledzi
+  # sam, w module Harmonogram (kafle „ostatnia synchronizacja" i historia
+  # przebiegow pokazuja to samo, co wykrywal ten alarm).
+  #
+  # Zadanie ZOSTAJE i dziala z zakladki Actions („Run workflow"). Zeby wrocic
+  # do automatu, odkomentuj ponizsze dwie linie:
+  #
   # NIEZALEZNY harmonogram — celowo POZA lancuchem synchronizacji, zeby
   # zadzialal takze wtedy, gdy lancuch jest zerwany. Co 3 h w ciagu dnia:
   # UTC 6,9,12,15,18,21 = PL (lato) 8,11,14,17,20,23. Kazdy przebieg widzi
   # poprzednia zakonczona synchronizacje.
-  schedule:
-    - cron: '0 6-21/3 * * *'
+  # schedule:
+  #   - cron: '0 6-21/3 * * *'
 
   workflow_dispatch: {}
 
