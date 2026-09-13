@@ -184,10 +184,11 @@ def main():
           + ("" if tryb == "zwykly" else f"  [tryb: {tryb}]"))
     print("=" * 70)
 
-    # Okno synchronizacji sterowane z workflow: rutynowe przebiegi trzymają
-    # wąskie okno (5 dni), a niedzielny sięga szerzej (30 dni — łapie
-    # publikacje opóźnione, np. interpretacje wydane ponownie po wyroku,
-    # wpadające do Eureki z kilkutygodniowym poślizgiem). OKNO_RECZNE ma
+    # Okno synchronizacji sterowane z workflow: rutynowe przebiegi 35 dni,
+    # niedzielny 60. EUREKA filtruje po dacie WYDANIA, a MF publikuje
+    # z poślizgiem 2–4 tygodni — okno krótsze niż ten poślizg przepuszcza
+    # dokumenty (13.09.2026: okno 5 dni przez tydzień nie złapało nic,
+    # a pierwsze szersze przyniosło naraz 245 interpretacji). OKNO_RECZNE ma
     # pierwszeństwo: to wejście „okno" przy ręcznym uruchomieniu.
     # Brak obu = zachowanie domyślne z raport_silnik.
     okno_env = os.environ.get("OKNO_RECZNE") or os.environ.get("OKNO_SYNCHRONIZACJI_DNI")

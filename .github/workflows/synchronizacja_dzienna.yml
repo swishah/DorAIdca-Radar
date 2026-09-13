@@ -8,18 +8,22 @@ on:
     # alternatywa (dwie pary cronow + odsiewanie w skrypcie) komplikuje kod
     # bardziej, niz jest warta.
     #
-    # RUTYNA: WASKIE OKNO, RAZ W TYGODNIU SZEROKIE
-    #   Kazdy dzien jest sprawdzany przy kazdym przebiegu, wiec przy oknie
-    #   5-dniowym i dwoch przebiegach dziennie dzien wpada w kontrole
-    #   dziesieciokrotnie. Interpretacje publikowane przez MF z kilkutygodniowym
-    #   poslizgiem lapie niedzielny przebieg z oknem 30 dni.
+    # OKNO 35 DNI NA CO DZIEN, 60 DNI RAZ W TYGODNIU
+    #   EUREKA filtruje po DACIE WYDANIA, a MF publikuje interpretacje
+    #   z poslizgiem 2-4 tygodni. Okno liczone od dzisiaj musi wiec siegac dalej
+    #   niz ten poslizg, inaczej dokument wpada do EUREKI juz poza oknem.
     #
-    #   Powod jest jeden: mniej zapytan o listy do MF przy tej samej
-    #   szczelnosci. Codzienne przemielanie dziesieciu dni dla kazdego podatku
-    #   bylo najwiekszym stalym obciazeniem, jakie im robimy.
-    - cron: '30 4 * * 1-6'   # 06:30 PL, poniedzialek-sobota — okno 5 dni
-    - cron: '30 21 * * *'    # 23:30 PL, codziennie          — okno 5 dni
-    - cron: '30 1 * * 0'     # 03:30 PL, niedziela           — okno 30 dni
+    #   Sprawdzone 13.09.2026: przy oknie 5 dni codzienne przebiegi przez tydzien
+    #   nie znalazly nic nowego, a pierwszy niedzielny przebieg z oknem 30 dni
+    #   przyniosl naraz 245 interpretacji wydanych 17.08-01.09. Powiadomienia
+    #   z monitoringu spoznialy sie przez to nawet o tydzien.
+    #
+    #   Koszt po stronie MF to zapytania o LISTY (kilkadziesiat na przebieg);
+    #   tresci pobieraja sie tylko dla dokumentow, ktorych nie ma w bazie.
+    #   Niedziela 60 dni lapie dokumenty publikowane z wiekszym opoznieniem.
+    - cron: '30 4 * * 1-6'   # 06:30 PL, poniedzialek-sobota — okno 35 dni
+    - cron: '30 21 * * *'    # 23:30 PL, codziennie          — okno 35 dni
+    - cron: '30 1 * * 0'     # 03:30 PL, niedziela           — okno 60 dni
 
   # Reczne uruchomienie: z zakladki Actions albo z modulu Harmonogram w Dockerze
   # (wykonawca). Przebiegi z harmonogramu nie maja wejsc — ida w trybie zwykly.
@@ -72,8 +76,8 @@ jobs:
           # powloki — skrot podatku sprawdza sam skrypt.
           TRYB_SYNC:              ${{ inputs.tryb || 'zwykly' }}
           PODATEK_SYNC:           ${{ inputs.podatek || '' }}
-          # Okno rutynowe 5 dni; niedzielny przebieg siega 30 dni wstecz.
-          OKNO_SYNCHRONIZACJI_DNI: ${{ github.event.schedule == '30 1 * * 0' && '30' || '5' }}
+          # Okno rutynowe 35 dni; niedzielny przebieg siega 60 dni wstecz.
+          OKNO_SYNCHRONIZACJI_DNI: ${{ github.event.schedule == '30 1 * * 0' && '60' || '35' }}
           # Reczne uruchomienie moze podac swoje okno — skrypt woli te wartosc.
           OKNO_RECZNE:            ${{ inputs.okno || '' }}
         run: python synchronizacja_dzienna.py
