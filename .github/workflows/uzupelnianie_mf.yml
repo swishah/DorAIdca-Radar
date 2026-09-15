@@ -1,0 +1,78 @@
+name: Uzupelnianie archiwum z MF
+
+# Zalegle interpretacje indywidualne (od 2023) — BEZ CHMURY. Uruchamia go
+# wykonawca w Dockerze (modul Harmonogram) z jednym podatkiem i jednym oknem
+# dat. Wynik to artefakt, ktory wykonawca wgrywa prosto do bazy w Dockerze;
+# Supabase go nie widzi. Nie ma tu harmonogramu: godziny, tempo, limity
+# i wstrzymanie po oznace blokady pilnuje Docker (zadania/uzupelnianie.py
+# w repozytorium infrastruktury). Ostroznosc wobec MF: uzupelnianie_mf.py.
+
+on:
+  workflow_dispatch:
+    inputs:
+      podatek:
+        description: 'Skrot podatku, np. PIT'
+        type: string
+        required: true
+      przepis:
+        description: 'ID ustawy w slowniku EUREKI (puste = podatek wbudowany)'
+        type: string
+        default: ''
+      od:
+        description: 'Poczatek okna dat wydania, RRRR-MM-DD'
+        type: string
+        required: true
+      do:
+        description: 'Koniec okna dat wydania, RRRR-MM-DD'
+        type: string
+        required: true
+      maks:
+        description: 'Najwiecej tresci w przebiegu'
+        type: string
+        default: '500'
+
+# Ta sama grupa co synchronizacja dzienna: dwa przebiegi nigdy nie pytaja MF
+# jednoczesnie — drugi czeka, az pierwszy skonczy.
+concurrency:
+  group: pobieranie-mf
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  uzupelnij:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+
+    steps:
+      - name: Pobierz kod repozytorium
+        uses: actions/checkout@v5
+
+      - name: Ustaw Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Zainstaluj zaleznosci
+        run: pip install requests PyPDF2 beautifulsoup4 lxml
+
+      - name: Pobierz zalegle interpretacje
+        env:
+          # Wejscia ida do skryptu przez zmienne, nigdy wprost do polecenia
+          # powloki — skrypt sam sprawdza skrot, daty i liczby.
+          PODATEK:  ${{ inputs.podatek }}
+          PRZEPIS:  ${{ inputs.przepis }}
+          OD:       ${{ inputs.od }}
+          DO:       ${{ inputs.do }}
+          MAKS_DOK: ${{ inputs.maks }}
+        run: python uzupelnianie_mf.py
+
+      - name: Zapisz wynik jako artefakt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uzupelnianie
+          path: wynik/
+          retention-days: 7
+          if-no-files-found: warn

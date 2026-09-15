@@ -43,6 +43,12 @@ on:
         type: string
         default: ''
 
+# Wspolna grupa z uzupelnianiem archiwum (uzupelnianie_mf.yml): oba przebiegi
+# pytaja MF, wiec nigdy naraz — pozniejszy czeka, az wczesniejszy skonczy.
+concurrency:
+  group: pobieranie-mf
+  cancel-in-progress: false
+
 jobs:
   synchronizuj:
     runs-on: ubuntu-latest
