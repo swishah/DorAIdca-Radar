@@ -623,9 +623,17 @@ def _obsluz_kanal(db, trafienia: list[dict], klucz: str, tytul: str,
             raise
         except Exception as e:
             print(f"[monitoring] BŁĄD wysyłki ({nazwa_logu}) na {adres}: {e}")
+            # Policzone, żeby main() mógł zwrócić kod błędu. Do 18.09.2026 błąd
+            # był tylko drukowany, więc workflow kończył się „success" mimo niewysłanych
+            # maili — unieważnione hasło aplikacji Gmaila chodziło niezauważone.
+            NIEUDANE_WYSYLKI.append(f"{nazwa_logu}: {e}")
 
 
 # ---------------------------------------------------------------------------
+# Nieudane wysyłki z całego przebiegu — patrz komentarz przy ich zliczaniu.
+NIEUDANE_WYSYLKI: list = []
+
+
 def main() -> int:
     db = _polacz()
     zapewnij_tabele(db)
@@ -678,6 +686,12 @@ def main() -> int:
 
     if not trafienia and not tr_b and not tr_p:
         print("[monitoring] Nic do wysłania.")
+    if NIEUDANE_WYSYLKI:
+        # Kod błędu, żeby GitHub Actions oznaczył przebieg jako nieudany.
+        # Cicha awaria poczty jest gorsza od braku maila: nikt nie wie,
+        # że monitoring przestał działać.
+        print("[monitoring] NIEUDANE WYSYŁKI: " + "; ".join(NIEUDANE_WYSYLKI))
+        return 1
     return 0
 
 

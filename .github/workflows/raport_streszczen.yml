@@ -1,0 +1,52 @@
+name: Raport streszczen (e-mail)
+
+# Odpowiednik maila po synchronizacji dziennej: tamten mowi, co POBRANO,
+# ten — co STRESZCZONO. Raz dziennie, o 6:00 UTC (8:00 czasu polskiego), czyli
+# po nocnej pracy automatu i po porannej synchronizacji z chmury do Dockera.
+#
+# Czyta baze W CHMURZE, bo tam pisze automat streszczania (funkcja brzegowa
+# streszczaj-interpretacje + pg_cron). Raport liczony z Dockera pokazywalby
+# stan sprzed ostatniej synchronizacji.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: raport-streszczen
+  cancel-in-progress: false
+
+jobs:
+  raportuj:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Pobierz repozytorium
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Zaleznosci
+        run: |
+          python -m pip install --upgrade pip
+          pip install psycopg2-binary
+
+      - name: Wyslij raport
+        env:
+          SUPABASE_HOST:          ${{ secrets.SUPABASE_HOST }}
+          SUPABASE_PORT:          ${{ secrets.SUPABASE_PORT }}
+          SUPABASE_DB:            ${{ secrets.SUPABASE_DB }}
+          SUPABASE_USER:          ${{ secrets.SUPABASE_USER }}
+          SUPABASE_PASSWORD:      ${{ secrets.SUPABASE_PASSWORD }}
+          GMAIL_ADRES:            ${{ secrets.GMAIL_ADRES }}
+          GMAIL_HASLO_APLIKACJI:  ${{ secrets.GMAIL_HASLO_APLIKACJI }}
+          EMAIL_ODBIORCA:         ${{ secrets.EMAIL_ODBIORCA }}
+        # Skrypt konczy sie kodem bledu, gdy poczta odmowi — cicha awaria
+        # wysylki jest gorsza od braku maila, bo nikt nie wie, ze raport
+        # przestal przychodzic (tak przez dobe chodzilo uniewaznione haslo
+        # aplikacji Gmaila, 17.09.2026).
+        run: python raport_streszczen.py

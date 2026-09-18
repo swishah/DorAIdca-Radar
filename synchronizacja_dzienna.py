@@ -243,6 +243,7 @@ def main():
     # Pierwsze pobranie nowego podatku nie wysyla dziennego podsumowania —
     # to nie jest dzienny przebieg, a jego wynik widac w module Harmonogram.
     wyslij_mail = tryb == "zwykly" and os.environ.get("SYNC_MAIL", "1") == "1"
+    mail_ok = True
     gmail_adres = os.environ.get("GMAIL_ADRES")
     gmail_haslo = os.environ.get("GMAIL_HASLO_APLIKACJI")
     odbiorca    = os.environ.get("EMAIL_ODBIORCA", gmail_adres)
@@ -252,7 +253,10 @@ def main():
     elif not gmail_adres or not gmail_haslo:
         print("\nBrak konfiguracji email — pomijam powiadomienie.")
     else:
-        silnik.wyslij_email_synchronizacja_dzienna(
+        # Wynik wysyłki zapamiętany: nieudany mail ma położyć przebieg, żeby awaria
+        # poczty nie chodziła niezauważona. 17.09.2026 Gmail przez dobę odrzucał
+        # hasło aplikacji (535 BadCredentials), a przebiegi kończyły się „success".
+        mail_ok = silnik.wyslij_email_synchronizacja_dzienna(
             wyniki, opis_okresu, gmail_adres, gmail_haslo, odbiorca, log_fn=print,
         )
 
@@ -301,6 +305,12 @@ def main():
     bledy_krytyczne = [w for w in wyniki if w["status"] == "ERROR"]
     if bledy_krytyczne:
         sys.exit(1)
+    if not mail_ok:
+        # Dane pobrane poprawnie, ale powiadomienie nie doszło — przebieg ma to
+        # zgłosić. Inaczej awaria poczty jest niewidoczna: dane sa, maila nie ma,
+        # a GitHub pokazuje „success".
+        print("\nSynchronizacja OK, ale nie udało się wysłać powiadomienia.")
+        sys.exit(2)
 
 
 if __name__ == "__main__":
