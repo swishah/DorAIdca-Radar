@@ -317,10 +317,17 @@ def zapisz_wiele_do_archiwum(db: SupabaseDB, rekordy: list, pobrano_kto: str = "
 
 
 def pobierz_rekordy_z_archiwum(db: SupabaseDB, podatek=None, rok=None, miesiac=None,
-                                  data_od=None, data_do=None) -> list:
+                                  data_od=None, data_do=None, bez_tresci=False) -> list:
     """
     Pobiera rekordy z opcjonalnym filtrowaniem.
     data_od/data_do: stringi YYYY-MM-DD do filtrowania zakresu dat.
+
+    bez_tresci=True pomija kolumne `tekst`. Tresc wazy srednio 46 kB na dokument
+    i w oknie 35 dni to 79 MB na jeden przebieg — a wolajacy, ktory chce tylko
+    policzyc dokumenty (synchronizacja dzienna, raport na zadanie bez pliku),
+    nie zaglada do niej ani razu. To byl glowny zjadacz egressu Supabase
+    (18.09.2026: ~160 MB dziennie przy limicie 5 GB na miesiac).
+    Rekord ma wtedy "Tekst": "" — _row_do_rekordu czyta przez .get().
     """
     kl, pa = [], []
     if podatek:
@@ -332,7 +339,9 @@ def pobierz_rekordy_z_archiwum(db: SupabaseDB, podatek=None, rok=None, miesiac=N
     elif rok:
         kl.append("data_wyd LIKE %s"); pa.append(f"{rok}%")
     where = f"WHERE {' AND '.join(kl)}" if kl else ""
-    rows = db.wykonaj(f"SELECT * FROM dokumenty {where} ORDER BY data_wyd DESC",
+    kolumny = ("id, sygnatura, podatek, data_wyd, link, format_zr, pobrano_dt"
+               if bez_tresci else "*")
+    rows = db.wykonaj(f"SELECT {kolumny} FROM dokumenty {where} ORDER BY data_wyd DESC",
                        pa if pa else None, fetch=True)
     return [_row_do_rekordu(r) for r in rows]
 

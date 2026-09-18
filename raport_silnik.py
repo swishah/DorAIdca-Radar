@@ -298,10 +298,13 @@ def generuj_raport_dla_podatku(
     try:
         nowych, status_pobierania = uzupelnij_archiwum(db, podatek, data_od, data_do, log_fn=log_fn)
 
+        # Tresci sa potrzebne wylacznie do pliku Word. Bez niego pobieramy
+        # same metadane — patrz db_core.pobierz_rekordy_z_archiwum.
         rekordy = db_core.pobierz_rekordy_z_archiwum(
             db, podatek=podatek,
             data_od=data_od.strftime("%Y-%m-%d"),
             data_do=data_do.strftime("%Y-%m-%d"),
+            bez_tresci=not generuj_plik,
         )
 
         if not rekordy:
@@ -360,6 +363,7 @@ def generuj_raport_dla_podatku(
                     db, podatek=podatek,
                     data_od=data_od.strftime("%Y-%m-%d"),
                     data_do=data_do.strftime("%Y-%m-%d"),
+                    bez_tresci=not generuj_plik,
                 )
                 wynik_weryfikacji = weryfikuj_kompletnosc(
                     podatek, data_od, data_do, len(rekordy), log_fn=log_fn, max_prob=2
