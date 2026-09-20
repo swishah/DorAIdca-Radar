@@ -1,0 +1,86 @@
+name: Uzupelnianie archiwum z MF (nocne)
+
+# Zalegle interpretacje indywidualne (od 2023) — teraz bez udzialu laptopa.
+#
+# Wczesniej okno dat wybieral wykonawca w Dockerze i to on zlecal przebieg,
+# wiec uzupelnianie chodzilo tylko przy wlaczonym komputerze — czyli nigdy.
+# Teraz plan trzyma chmura (uzupelnianie_stan), okno wybiera skrypt, a Docker
+# ma juz tylko odebrac artefakt, gdy go wlaczysz.
+#
+# TRESCI NADAL OMIJAJA CHMURE: do Supabase idzie sam plan (kilka kilobajtow),
+# dokumenty jada artefaktem prosto do Dockera.
+#
+# GODZINY
+#   Cron GitHuba chodzi po UTC, a okno nocne jest polskie (00:45–05:15).
+#   Wybrane godziny mieszcza sie w nim i zima, i latem (UTC 23:45–03:15 to
+#   czesc wspolna obu przesuniec). Cztery przebiegi po 400 tresci = 1600,
+#   przyciete przez skrypt do 1500 na noc.
+
+on:
+  schedule:
+    - cron: '45 23 * * *'
+    - cron: '45 0 * * *'
+    - cron: '45 1 * * *'
+    - cron: '45 2 * * *'
+  workflow_dispatch:
+    inputs:
+      maks:
+        description: 'Najwiecej tresci w tym przebiegu (reczne uruchomienie)'
+        type: string
+        default: '30'
+      sucho:
+        description: 'Tylko pokaz okno, nie pytaj MF'
+        type: boolean
+        default: false
+
+# Ta sama grupa co synchronizacja dzienna i stary workflow zlecany z Dockera:
+# dwa przebiegi nigdy nie pytaja MF jednoczesnie — drugi czeka, az pierwszy
+# skonczy. Nie przerywamy trwajacego: urwane pobieranie to zmarnowany ruch
+# u MF, a wlasnie ruchu u MF oszczedzamy.
+concurrency:
+  group: pobieranie-mf
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  uzupelnij:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+
+    steps:
+      - name: Pobierz repozytorium
+        uses: actions/checkout@v5
+
+      - name: Ustaw Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Zainstaluj zaleznosci
+        run: pip install requests PyPDF2 beautifulsoup4 lxml psycopg2-binary
+
+      - name: Wybierz okno i pobierz zalegle interpretacje
+        env:
+          SUPABASE_HOST:     ${{ secrets.SUPABASE_HOST }}
+          SUPABASE_PORT:     ${{ secrets.SUPABASE_PORT }}
+          SUPABASE_DB:       ${{ secrets.SUPABASE_DB }}
+          SUPABASE_USER:     ${{ secrets.SUPABASE_USER }}
+          SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
+          # Przy uruchomieniu recznym obowiazuje podany limit; noca pole jest
+          # puste i skrypt bierze swoj wlasny (400 na przebieg, 1500 na noc).
+          MAKS_DOK: ${{ inputs.maks }}
+          SUCHO:    ${{ inputs.sucho && '1' || '' }}
+        run: python uzupelnianie_nocne.py
+
+      - name: Zapisz wynik jako artefakt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uzupelnianie
+          path: wynik/
+          # 30 dni zamiast 7: Docker odbiera artefakty dopiero wtedy, gdy go
+          # wlaczysz, a przy tygodniowej przerwie nocna praca przepadalaby.
+          retention-days: 30
+          if-no-files-found: ignore
