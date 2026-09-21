@@ -75,9 +75,11 @@ jobs:
           SUPABASE_DB:            ${{ secrets.SUPABASE_DB }}
           SUPABASE_USER:          ${{ secrets.SUPABASE_USER }}
           SUPABASE_PASSWORD:      ${{ secrets.SUPABASE_PASSWORD }}
-          GMAIL_ADRES:            ${{ secrets.GMAIL_ADRES }}
-          GMAIL_HASLO_APLIKACJI:  ${{ secrets.GMAIL_HASLO_APLIKACJI }}
-          EMAIL_ODBIORCA:         ${{ secrets.EMAIL_ODBIORCA }}
+          # Ten przebieg NIE wysyla juz wlasnego maila. Od 21.09.2026 jest jeden
+          # dzienny list (raport_dzienny.yml), ktory mowi i o pobieraniu,
+          # i o streszczeniach — a przy tym wychodzi takze wtedy, gdy ta
+          # synchronizacja w ogole nie doszla do konca.
+          SYNC_MAIL: '0'
           # Wejscia trafiaja do skryptu przez zmienne, nigdy wprost do polecenia
           # powloki — skrot podatku sprawdza sam skrypt.
           TRYB_SYNC:              ${{ inputs.tryb || 'zwykly' }}

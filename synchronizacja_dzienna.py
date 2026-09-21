@@ -11,7 +11,9 @@ Co robi:
      okna i dociaga do bazy WYLACZNIE nowe dokumenty (duplikaty pomijane
      automatycznie przez ON CONFLICT DO NOTHING w warstwie zapisu).
   3. Weryfikuje kompletnosc (drugie, niezalezne zapytanie do MF).
-  4. Wysyla krotkie, codzienne powiadomienie mailowe z podsumowaniem.
+  4. NIE wysyla juz maila — od 21.09.2026 jest jeden dzienny raport
+     (raport_dzienny.py), ktory mowi i o pobieraniu, i o streszczeniach.
+     Wlacznik SYNC_MAIL=1 przywraca stary list, gdyby byl potrzebny.
   5. Zapisuje wpis w historii synchronizacji (widoczny w aplikacji).
 
 Dlaczego okno ruchome, a nie jeden dzien: MF czasem publikuje interpretacje

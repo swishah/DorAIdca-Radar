@@ -1,12 +1,22 @@
-name: Raport streszczen (e-mail)
+name: Raport dzienny (e-mail)
 
-# Odpowiednik maila po synchronizacji dziennej: tamten mowi, co POBRANO,
-# ten — co STRESZCZONO. Raz dziennie, o 6:00 UTC (8:00 czasu polskiego), czyli
-# po nocnej pracy automatu i po porannej synchronizacji z chmury do Dockera.
+# JEDEN mail na dobe: co POBRANO z MF i co STRESZCZONO.
 #
-# Czyta baze W CHMURZE, bo tam pisze automat streszczania (funkcja brzegowa
-# streszczaj-interpretacje + pg_cron). Raport liczony z Dockera pokazywalby
-# stan sprzed ostatniej synchronizacji.
+# Do 21.09.2026 przychodzily dwa listy — jeden wysylala sama synchronizacja
+# dzienna, drugi raport o streszczeniach. Mowily o dwoch polowach tej samej
+# doby. Zyczenie wlasciciela: „jeden mail z jednym i drugim wystarczy".
+#
+# Ustawienie ma jeszcze jedna zalete. Poprzednio list o pobieraniu wysylal sam
+# przebieg synchronizacji, wiec gdy ten ginal na limicie czasu (19 i 20.09.2026,
+# prace serwisowe MF), nie przychodzilo NIC — cisza nie do odroznienia od
+# spokojnego dnia. Teraz raport jest osobnym przebiegiem i powie wprost,
+# ze pobieranie stoi.
+#
+# 6:00 UTC (8:00 czasu polskiego): po nocnej pracy automatu streszczajacego
+# i po porannej synchronizacji (4:30 UTC).
+#
+# Czyta baze W CHMURZE, bo tam pisza oba automaty. Raport liczony z Dockera
+# pokazywalby stan sprzed ostatniej synchronizacji.
 
 on:
   schedule:
@@ -14,7 +24,7 @@ on:
   workflow_dispatch: {}
 
 concurrency:
-  group: raport-streszczen
+  group: raport-dzienny
   cancel-in-progress: false
 
 jobs:
@@ -49,4 +59,4 @@ jobs:
         # wysylki jest gorsza od braku maila, bo nikt nie wie, ze raport
         # przestal przychodzic (tak przez dobe chodzilo uniewaznione haslo
         # aplikacji Gmaila, 17.09.2026).
-        run: python raport_streszczen.py
+        run: python raport_dzienny.py
