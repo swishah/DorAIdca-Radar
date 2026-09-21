@@ -1,0 +1,73 @@
+name: Interpretacje ogolne (EUREKA)
+
+# Sprawdza, czy pojawila sie nowa interpretacja ogolna, i dociaga jej tresc.
+#
+# DLACZEGO OSOBNY WORKFLOW, A NIE KROK SYNCHRONIZACJI DZIENNEJ
+#   Interpretacji ogolnych jest kilkanascie od 2024 roku i przybywa kilka
+#   rocznie; indywidualnych — kilkadziesiat tysiecy i setki dziennie.
+#   Synchronizacja dzienna chodzi w oknie ruchomym, dzieli okresy przy tysiacu
+#   wynikow i weryfikuje kompletnosc po podatkach. Doklejanie do niej zapytania
+#   o garstke dokumentow komplikowaloby skrypt, ktory i tak jest najwazniejszy
+#   w calym systemie. Tutaj wystarczy jedno zapytanie o cala liste od 2024 r.
+#
+#   Osobny przebieg ma jeszcze te zalete, ze awaria tego pobierania nie ma jak
+#   polozyc codziennej synchronizacji.
+#
+# GODZINA
+#   5:20 UTC (7:20 PL) — po nocnym uzupelnianiu archiwum (konczy sie 3:15 UTC)
+#   i przed porannym raportem (6:00 UTC), a z dala od synchronizacji (4:30).
+#
+# STRESZCZENIE robi automat w chmurze, nie ten workflow: bierze interpretacje
+# ogolne dopiero wtedy, gdy nie ma ani jednej biezacej interpretacji w kolejce,
+# zeby nie opozniac tego, co doradca czyta codziennie.
+
+on:
+  schedule:
+    - cron: '20 5 * * *'
+  workflow_dispatch:
+    inputs:
+      od:
+        description: 'Poczatek okresu, RRRR-MM-DD (puste = 2024-01-01)'
+        type: string
+        default: ''
+      sucho:
+        description: 'Tylko pokaz liste, nie pobieraj tresci'
+        type: boolean
+        default: false
+
+# Ta sama grupa co synchronizacja dzienna i uzupelnianie: dwa przebiegi nigdy
+# nie pytaja MF jednoczesnie.
+concurrency:
+  group: pobieranie-mf
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  pobierz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Pobierz repozytorium
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Zaleznosci
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests PyPDF2 beautifulsoup4 lxml psycopg2-binary
+
+      - name: Sprawdz i pobierz
+        env:
+          SUPABASE_HOST:     ${{ secrets.SUPABASE_HOST }}
+          SUPABASE_PORT:     ${{ secrets.SUPABASE_PORT }}
+          SUPABASE_DB:       ${{ secrets.SUPABASE_DB }}
+          SUPABASE_USER:     ${{ secrets.SUPABASE_USER }}
+          SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
+          OGOLNE_OD:         ${{ inputs.od }}
+        run: python interpretacje_ogolne.py ${{ inputs.sucho && '--sucho' || '' }}
