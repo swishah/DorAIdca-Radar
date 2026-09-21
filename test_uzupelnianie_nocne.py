@@ -27,22 +27,37 @@ sys.modules["uzupelnianie_mf"] = mf
 
 import uzupelnianie_nocne as n
 
-# --- wybor okna --------------------------------------------------------------
-pod = {"PIT": {"nastepne_od": "2023-01-01", "koniec": "2026-06-21"},
-       "CIT": {"nastepne_od": "2023-02-10", "koniec": "2023-02-15"},
-       "VAT": {"nastepne_od": "2024-01-03", "koniec": "2024-01-02"}}
-assert n.nastepne_okno(pod) == ("PIT", "2023-01-01", "2023-01-31")
-pod["PIT"]["nastepne_od"] = "2023-02-11"
-# Najwczesniejszy niepobrany miesiac wygrywa niezaleznie od podatku.
-assert n.nastepne_okno(pod) == ("CIT", "2023-02-10", "2023-02-15")
-pod["CIT"]["nastepne_od"] = "2023-02-16"
-assert n.nastepne_okno(pod) == ("PIT", "2023-02-11", "2023-02-28")
-# VAT ma nastepne_od za koniec — jest zrobiony i nie wraca do kolejki.
-pod["PIT"]["nastepne_od"] = "2026-06-22"
-assert n.nastepne_okno(pod) is None
-# Okno nigdy nie przekracza konca planu.
-assert n.nastepne_okno({"X": {"nastepne_od": "2023-01-01", "koniec": "2023-01-10"}}) \
-       == ("X", "2023-01-01", "2023-01-10")
+# --- wybor okna z audytu kompletnosci ---
+class BazaAtrapa:
+    """Oddaje to, co widok braki_archiwum — bez bazy."""
+    def __init__(self, wiersze): self.wiersze, self.zapisy = wiersze, []
+    def wykonaj(self, sql, params=None, fetch=False):
+        if fetch:
+            return self.wiersze
+        self.zapisy.append((sql, params))
+        return 1
+
+
+# Najstarszy miesiac wygrywa niezaleznie od podatku — chodzi o to, zeby
+# archiwum zapelnialo sie od dolu, a nie podatek po podatku.
+db = BazaAtrapa([{"podatek": "VAT", "miesiac": "2024-02", "brakuje": 824}])
+assert n.nastepne_okno(db) == ("VAT", "2024-02", "2024-02-01", "2024-02-29", 824)
+
+# Grudzien: okno konczy sie 31.12, a nie przechodzi na styczen.
+db = BazaAtrapa([{"podatek": "PIT", "miesiac": "2023-12", "brakuje": 5}])
+assert n.nastepne_okno(db) == ("PIT", "2023-12", "2023-12-01", "2023-12-31", 5)
+
+# Luty roku przestepnego ma 29 dni — inaczej ostatni dzien wypadlby z okna.
+db = BazaAtrapa([{"podatek": "CIT", "miesiac": "2024-02", "brakuje": 1}])
+assert n.nastepne_okno(db)[3] == "2024-02-29"
+
+# Brak brakow = koniec pracy.
+assert n.nastepne_okno(BazaAtrapa([])) is None
+
+# Postep zapisuje sie w audycie, zanim Docker potwierdzi wlasnym licznikiem.
+db = BazaAtrapa([])
+n.zanotuj_pobranie(db, "VAT", "2024-02", 400)
+assert db.zapisy and db.zapisy[0][1] == ("VAT", "2024-02", 400), db.zapisy
 
 # --- budzet nocy -------------------------------------------------------------
 # Przebiegi 23:45–02:45 UTC naleza do TEJ SAMEJ nocy polskiej — inaczej limit

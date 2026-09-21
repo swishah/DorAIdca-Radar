@@ -107,8 +107,19 @@ def zbierz_synchronizacje(db) -> dict:
            WHERE pobrano_at >= now() - interval '24 hours'
            GROUP BY 1 ORDER BY 2 DESC""", fetch=True) or []
 
+    # Braki w archiwum wedlug audytu kompletnosci (schemat 24). Do 21.09.2026
+    # nie dalo sie odpowiedziec na pytanie „czy archiwum jest kompletne";
+    # teraz odpowiedz przychodzi sama, codziennie.
+    try:
+        braki = db.wykonaj(
+            """SELECT podatek, sum(brakuje)::int AS brakuje, count(*)::int AS miesiecy
+               FROM braki_archiwum GROUP BY 1 ORDER BY 2 DESC""", fetch=True) or []
+    except Exception:
+        braki = []              # tabela istnieje tylko w chmurze
+
     return {"przebiegi": przebiegi, "ostatni_ok": ostatni_ok,
-            "godzin_od_ok": godzin, "nowe": nowe,
+            "godzin_od_ok": godzin, "nowe": nowe, "braki": braki,
+            "brakuje_razem": sum(b["brakuje"] for b in braki),
             "nowych_razem": sum(n["ile"] for n in nowe)}
 
 
@@ -206,6 +217,17 @@ def zbuduj(sync: dict, stre: dict) -> tuple:
                           for o in stre["odlozone"])
         odlozone = f"<h3>Odłożone po nieudanych próbach</h3><ul>{pozycje}</ul>"
 
+    braki_w = "".join(
+        f"<tr><td>{b['podatek']}</td><td align='right'>{b['brakuje']}</td>"
+        f"<td align='right'>{b['miesiecy']}</td></tr>" for b in sync["braki"])
+    braki_w = (f"<table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse'><tr style='background:#eee'>"
+               "<th align='left'>Podatek</th><th>Brakuje</th><th>Miesięcy</th></tr>"
+               f"{braki_w}</table>"
+               f"<p style='color:#666; font-size:12px'>Razem {sync['brakuje_razem']} "
+               "dokumentów. Nocne uzupełnianie bierze najstarszy miesiąc z brakiem; "
+               "audyt sprawdza liczby w EURECE i sam wychwyci, gdy MF dopublikuje "
+               "coś wstecz.</p>") if sync["braki"] else         "<p>Archiwum kompletne według audytu.</p>"
+
     tabela = 'border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse"'
     # Tabele z wieloma wierszami dostaja mniejsza czcionke — osobna stala,
     # bo dwa atrybuty style w jednym znaczniku przegladarki czytaja roznie.
@@ -228,6 +250,9 @@ def zbuduj(sync: dict, stre: dict) -> tuple:
         <th>Kiedy</th><th align="left">Podatek</th><th>W oknie</th><th>Nowych</th><th align="left">Status</th>
       </tr>{przebiegi}
     </table>
+
+    <h3>📚 Zaległości w archiwum</h3>
+    {braki_w}
 
     <h3>📝 Streszczenia</h3>
     <table {tabela}>

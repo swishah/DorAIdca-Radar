@@ -32,6 +32,10 @@ on:
         description: 'Tylko pokaz okno, nie pytaj MF'
         type: boolean
         default: false
+      audyt:
+        description: 'Ile par (podatek, miesiac) sprawdzic w audycie'
+        type: string
+        default: '60'
 
 # Ta sama grupa co synchronizacja dzienna i stary workflow zlecany z Dockera:
 # dwa przebiegi nigdy nie pytaja MF jednoczesnie — drugi czeka, az pierwszy
@@ -60,6 +64,20 @@ jobs:
 
       - name: Zainstaluj zaleznosci
         run: pip install requests PyPDF2 beautifulsoup4 lxml psycopg2-binary
+
+      # Audyt PRZED pobieraniem: pyta EUREKE o same liczby (size=1, 0,4 s na
+      # zapytanie, zero tresci) i zapisuje, ile dokumentow ma kazdy miesiac.
+      # Z tego planer wybiera okno — inaczej wybieralby je regula, ktora nie
+      # widzi dziur w srodku archiwum.
+      - name: Audyt kompletnosci archiwum
+        env:
+          SUPABASE_HOST:     ${{ secrets.SUPABASE_HOST }}
+          SUPABASE_PORT:     ${{ secrets.SUPABASE_PORT }}
+          SUPABASE_DB:       ${{ secrets.SUPABASE_DB }}
+          SUPABASE_USER:     ${{ secrets.SUPABASE_USER }}
+          SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
+          AUDYT_MAKS:        ${{ inputs.audyt || '60' }}
+        run: python audyt_archiwum.py
 
       - name: Wybierz okno i pobierz zalegle interpretacje
         env:
