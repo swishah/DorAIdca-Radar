@@ -232,6 +232,20 @@ def strumien_uzasadnienia(db, sesja, formularz, log=print):
             db, "UZASADNIENIA", od, do, podatek, len(lista), nowych, zaktual, status,
             f"bledy dokumentow: {bledy}" if bledy else "")
 
+    # Trwaly brak oznaczamy TYLKO po przebiegu bez bledow wyszukiwania.
+    # Ten znacznik jest jednokierunkowy: oznaczony rekord wypada ze strumienia
+    # uzasadnien na zawsze. 22.09.2026 przebieg, w ktorym KAZDE zapytanie do
+    # CBOSA padlo, przestawil mimo to 293 wyroki na BEZ_UZASADNIENIA_TRWALE —
+    # bo regula patrzy tylko na date orzeczenia i pusta tresc, a nie na to, czy
+    # w ogole udalo sie o cokolwiek zapytac. Skasowanie 293 rekordow z obiegu
+    # na podstawie przebiegu, ktory nie pobral ani jednej strony, to nie jest
+    # wniosek — to skutek uboczny awarii.
+    if bledy_wyszukiwania:
+        log(f"\nPomijam oznaczanie trwalych brakow — {bledy_wyszukiwania} bledow "
+            f"wyszukiwania w tym przebiegu. Znacznik jest jednokierunkowy, wiec "
+            f"stawiamy go tylko po czystym przebiegu.")
+        return bledy_wyszukiwania
+
     trwale = db_wyroki.oznacz_trwale_braki(db)
     if trwale:
         log(f"\nOznaczono {trwale} rekordow jako BEZ_UZASADNIENIA_TRWALE "
