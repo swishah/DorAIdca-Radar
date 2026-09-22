@@ -104,6 +104,20 @@ MOST_URL   = (os.environ.get("CBOSA_MOST_URL") or "").strip()
 MOST_KLUCZ = (os.environ.get("CBOSA_MOST_KLUCZ") or "").strip()
 MAKS_PRZEKIEROWAN = 5
 
+# REGION MOSTU — to jest sedno calego obejscia.
+#
+# Supabase uruchamia funkcje brzegowa w regionie najblizszym WOLAJACEMU, a nie
+# w regionie projektu. Zadanie z mojej maszyny trafia wiec do eu-central-1
+# i CBOSA odpowiada 200 w 400 ms, a to samo zadanie z runnera GitHuba trafia do
+# us-east-1 albo us-east-2 i CBOSA zamyka polaczenie. Zmierzone wprost, jednym
+# przebiegiem sondy: bez naglowka region=us-east-1 i blad, z naglowkiem
+# region=eu-central-1 i 200 na tej samej maszynie, w tej samej minucie.
+#
+# Przez trzy nieudane przebiegi wygladalo to na blokade adresow centrow danych
+# albo na kare za zbyt gesty ruch. W rzeczywistosci CBOSA odcina ruch spoza
+# Europy — takze wtedy, gdy formalnie idzie przez europejski projekt.
+MOST_REGION = (os.environ.get("CBOSA_MOST_REGION") or "eu-central-1").strip()
+
 
 class OdpowiedzMostu:
     """Tyle z interfejsu requests.Response, ile uzywa reszta modulu."""
@@ -147,8 +161,11 @@ def _przez_most(sesja: requests.Session, metoda: str, url: str, **kw) -> Odpowie
         }
         if kw.get("data"):
             zlecenie["dane"] = kw["data"]
+        naglowki = {"x-most-klucz": MOST_KLUCZ}
+        if MOST_REGION:
+            naglowki["x-region"] = MOST_REGION
         r = requests.post(MOST_URL, json=zlecenie, timeout=TIMEOUT_S + 30,
-                          headers={"x-most-klucz": MOST_KLUCZ})
+                          headers=naglowki)
         if r.status_code != 200:
             raise requests.RequestException(
                 "most odpowiedzial HTTP %s: %s" % (r.status_code, r.text[:200]))
