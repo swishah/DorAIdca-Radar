@@ -20,6 +20,13 @@ JAK MIERZY (dwa niezalezne sprawdzenia, celowo)
        LUKA_REKORDU nie ma go u nas wcale.
      Kazda luka wieksza od zera znaczy, ze funkcja nie spelnia swojej roli.
 
+     UWAGA CO DO "BEZ TRESCI": ta kolumna zawyza. Filtr "z uzasadnieniem"
+     zwraca takze orzeczenia, ktorych strona /doc/<ID> ma na razie sama
+     sentencje — sprawdzone 22.09.2026 na 33 wyrokach akcyzowych z 15-16.09,
+     pobranych bez jednego bledu i mimo to pustych. Filtr znaczy raczej
+     "uzasadnienie bedzie" niz "uzasadnienie jest". Ile z luki jest prawdziwe,
+     rozstrzyga dopiero probka (czesc 3), ktora otwiera strony dokumentow.
+
      UWAGA CO DO OKNA: CBOSA opisuje te pola jako "Data orzeczenia", ale
      w odpowiedzi potrafi dolozyc starsze wyroki (widziane: 2025-04-29
      w oknie lipiec–wrzesien 2026) — najpewniej te, ktorych uzasadnienie
