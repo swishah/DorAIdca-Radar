@@ -95,15 +95,23 @@ def zapisz(db, zmiany: dict) -> None:
         (KLUCZ, json.dumps(zmiany, ensure_ascii=False)))
 
 
-def nastepne_okno(db):
+def nastepne_okno(db, pomin=()):
     """(podatek, miesiac, od, do, brakuje) — najstarszy miesiac z brakiem.
 
     Braki liczy widok braki_archiwum: EUREKA ma wiecej niz GREATEST(w_bazie,
     pobrane_nocami). Drugi skladnik jest konieczny, bo Docker potwierdza stan
     dopiero, gdy go wlaczysz — bez tego ten sam miesiac wracalby co noc.
+
+    `pomin` to klucze „PODATEK|RRRR-MM" odwiedzone juz tej nocy. Bez tego
+    miesiac, z ktorego nie da sie nic pobrac (EUREKA liczy dokument, ktorego
+    nie ma jak sciagnac, albo data wydania wpada w inny miesiac niz w bazie),
+    wracal w kazdym obrocie petli: pobrane=0 nie zmniejsza budzetu ani braku,
+    wiec noc krecila sie w kolko na jednym zapytaniu do MF przez cztery godziny.
     """
     w = db.wykonaj("""SELECT podatek, miesiac, brakuje FROM braki_archiwum
-                      ORDER BY miesiac, podatek LIMIT 1""", fetch=True) or []
+                      WHERE NOT (podatek || '|' || miesiac = ANY(%s))
+                      ORDER BY miesiac, podatek LIMIT 1""",
+                   (list(pomin),), fetch=True) or []
     if not w:
         return None
     podatek, miesiac, brakuje = w[0]["podatek"], w[0]["miesiac"], w[0]["brakuje"]
@@ -187,6 +195,7 @@ def main() -> int:
     if koniec_nocy <= start:
         koniec_nocy += timedelta(days=1)
     okien, pobrane_lacznie = 0, 0
+    odwiedzone = []          # kazdy miesiac najwyzej raz na noc — patrz nastepne_okno
     while budzet > 0:
         teraz = datetime.now(timezone.utc)
         # Nowego okna nie zaczynamy po godzinie zamkniecia nocy ani po czterech
@@ -200,13 +209,17 @@ def main() -> int:
             print("Przebieg trwa juz ponad %s — konczę." % MAKS_DLUGOSC)
             break
 
-        okno = nastepne_okno(db)
+        okno = nastepne_okno(db, odwiedzone)
         if not okno:
-            zapisz(db, {"ukonczono": teraz.isoformat()})
-            print("Nie ma czego uzupelniac — archiwum kompletne wedlug audytu.")
+            if odwiedzone:
+                print("Kazdy miesiac z brakiem byl juz tej nocy odwiedzony — koniec.")
+            else:
+                zapisz(db, {"ukonczono": teraz.isoformat()})
+                print("Nie ma czego uzupelniac — archiwum kompletne wedlug audytu.")
             break
 
         kod, miesiac, od, do, brakuje = okno
+        odwiedzone.append("%s|%s" % (kod, miesiac))
         if not przepisy.get(kod):
             print("Brak numeru przepisu dla podatku %s — pomijam." % kod)
             break

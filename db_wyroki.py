@@ -114,10 +114,13 @@ def zapisz_wyrok(db: db_core.SupabaseDB, w: dict) -> str:
                             pobrano_pierwszy, aktualizacja_ostatnia)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (id) DO UPDATE SET
-            sygnatura       = EXCLUDED.sygnatura,
+            -- Sygnatura i data tylko niepuste, jak pozostale pola. Do 22.09.2026
+            -- szly bezwarunkowo: strona CBOSA bez tytulu (prace, przeciazenie)
+            -- zerowala date i wstawiala sygnature sprawy powiazanej.
+            sygnatura       = CASE WHEN EXCLUDED.sygnatura <> '' THEN EXCLUDED.sygnatura ELSE wyroki.sygnatura END,
             rodzaj          = CASE WHEN EXCLUDED.rodzaj <> '' THEN EXCLUDED.rodzaj ELSE wyroki.rodzaj END,
             sad             = CASE WHEN EXCLUDED.sad <> '' THEN EXCLUDED.sad ELSE wyroki.sad END,
-            data_orzeczenia = EXCLUDED.data_orzeczenia,
+            data_orzeczenia = CASE WHEN EXCLUDED.data_orzeczenia <> '' THEN EXCLUDED.data_orzeczenia ELSE wyroki.data_orzeczenia END,
             podatek         = CASE WHEN EXCLUDED.podatek <> '' THEN EXCLUDED.podatek ELSE wyroki.podatek END,
             symbole         = CASE WHEN EXCLUDED.symbole <> '' THEN EXCLUDED.symbole ELSE wyroki.symbole END,
             hasla           = CASE WHEN EXCLUDED.hasla <> '' THEN EXCLUDED.hasla ELSE wyroki.hasla END,
@@ -160,6 +163,9 @@ def oznacz_trwale_braki(db: db_core.SupabaseDB) -> int:
     rows = db.wykonaj(
         """UPDATE wyroki SET status_tresci = %s, aktualizacja_ostatnia = %s
            WHERE status_tresci = %s AND data_orzeczenia < %s
+             -- Data jest tekstem, a pusty tekst jest "mniejszy" od kazdej daty:
+             -- bez tego warunku wyrok bez daty dostawal trwaly brak od razu.
+             AND data_orzeczenia ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
            RETURNING id""",
         (STATUS_TRWALY_BRAK, datetime.now().isoformat(timespec="seconds"),
          STATUS_OCZEKUJE, prog_data),
@@ -243,6 +249,12 @@ def zapisz_historie_sync_wyrokow(db, strumien, okno_od, okno_do, podatek,
         (datetime.now().isoformat(timespec="seconds"), strumien, okno_od, okno_do,
          podatek, znaleziono, nowych, zaktualizowanych, status, szczegoly),
     )
+
+
+def pobierz_id_z_sentencja(db: db_core.SupabaseDB) -> set:
+    """Id wyrokow, ktore maja juz sentencje — same identyfikatory, bez tresci."""
+    rows = db.wykonaj("SELECT id FROM wyroki WHERE sentencja <> ''", fetch=True)
+    return {r["id"] for r in rows or []}
 
 
 def pobierz_historie_sync_wyrokow(db, limit: int = 40) -> list:

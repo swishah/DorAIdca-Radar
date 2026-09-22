@@ -182,6 +182,7 @@ def strumien_uzasadnienia(db, sesja, formularz, log=print):
     od, do = _okno(OKNO_UZASADNIEN_DNI)
     log(f"\n=== STRUMIEN 2: UZASADNIENIA | okno {od}..{do} (filtr: z uzasadnieniem) ===")
     znane = db_wyroki.pobierz_id_wyrokow(db)
+    z_sentencja = db_wyroki.pobierz_id_z_sentencja(db)
     bledy_wyszukiwania = 0
 
     for podatek, symbol in cbosa.SYMBOLE_PODATKOW.items():
@@ -210,12 +211,22 @@ def strumien_uzasadnienia(db, sesja, formularz, log=print):
             + (f" (CBOSA: {total})" if total is not None else "")
             + f", wymaga pobrania/aktualizacji: {len(do_pobrania)}")
 
-        nowych, zaktual, bledy = 0, 0, 0
+        nowych, zaktual, bez_zmian, bledy = 0, 0, 0, 0
         for k, did in enumerate(do_pobrania, 1):
             try:
                 w = cbosa.pobierz_szczegoly(sesja, did, log_fn=None)
                 if (w.get("rodzaj") or "").strip().lower().startswith("postanowienie"):
                     continue   # zabezpieczenie 2. poziomu — jak w strumieniu 1
+                # Filtr CBOSA "z uzasadnieniem" zwraca tez wyroki, ktorych
+                # strona ma na razie sama sentencje. Pobrac je trzeba (tylko tak
+                # widac, kiedy uzasadnienie sie pojawi), ale zapis znanego
+                # rekordu bez nowej tresci niczego nie wnosi — a podbija
+                # aktualizacja_ostatnia, przez co Docker co tydzien kopiowal te
+                # same wiersze od nowa. Prawomocnosc zalatwia strumien 3.
+                if (did in znane and w.get("status_tresci") != db_wyroki.STATUS_KOMPLETNY
+                        and did in z_sentencja):
+                    bez_zmian += 1
+                    continue
                 wynik = db_wyroki.zapisz_wyrok(db, w)
                 if wynik == "NOWY":
                     nowych += 1
@@ -227,10 +238,14 @@ def strumien_uzasadnienia(db, sesja, formularz, log=print):
                 bledy += 1
                 log(f"[{podatek}] Blad dokumentu {did}: {e}")
 
+        if bez_zmian:
+            log(f"[{podatek}] Bez zmian (na CBOSA wciaz sama sentencja): {bez_zmian}")
         status = "OK" if bledy == 0 else ("CZESCIOWO" if (nowych + zaktual) else "ERROR")
+        uwagi = [f"bledy dokumentow: {bledy}" if bledy else "",
+                 f"bez zmian: {bez_zmian}" if bez_zmian else ""]
         db_wyroki.zapisz_historie_sync_wyrokow(
             db, "UZASADNIENIA", od, do, podatek, len(lista), nowych, zaktual, status,
-            f"bledy dokumentow: {bledy}" if bledy else "")
+            ", ".join(u for u in uwagi if u))
 
     # Trwaly brak oznaczamy TYLKO po przebiegu bez bledow wyszukiwania.
     # Ten znacznik jest jednokierunkowy: oznaczony rekord wypada ze strumienia

@@ -54,6 +54,23 @@ assert n.nastepne_okno(db)[3] == "2024-02-29"
 # Brak brakow = koniec pracy.
 assert n.nastepne_okno(BazaAtrapa([])) is None
 
+# Miesiac odwiedzony tej nocy nie wraca, nawet gdy nic z niego nie pobrano.
+# Bez tego pobrane=0 krecilo petla na tym samym miesiacu przez cztery godziny.
+class BazaZWidokiem(BazaAtrapa):
+    """Jak widok braki_archiwum: filtruje po liscie pominietych."""
+    def wykonaj(self, sql, params=None, fetch=False):
+        if fetch:
+            pomin = set(params[0]) if params else set()
+            return [w for w in self.wiersze
+                    if "%s|%s" % (w["podatek"], w["miesiac"]) not in pomin][:1]
+        return super().wykonaj(sql, params, fetch)
+
+db = BazaZWidokiem([{"podatek": "VAT", "miesiac": "2024-02", "brakuje": 3},
+                    {"podatek": "VAT", "miesiac": "2024-03", "brakuje": 9}])
+assert n.nastepne_okno(db)[1] == "2024-02"
+assert n.nastepne_okno(db, ["VAT|2024-02"])[1] == "2024-03"
+assert n.nastepne_okno(db, ["VAT|2024-02", "VAT|2024-03"]) is None
+
 # Postep zapisuje sie w audycie, zanim Docker potwierdzi wlasnym licznikiem.
 db = BazaAtrapa([])
 n.zanotuj_pobranie(db, "VAT", "2024-02", 400)

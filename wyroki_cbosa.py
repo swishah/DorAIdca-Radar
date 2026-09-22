@@ -37,6 +37,10 @@ SYMBOLE SPRAW (klasyfikacja sadowa) — filtr glowny:
 import os
 import re
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from urllib.parse import urljoin
+
 import requests
 from bs4 import BeautifulSoup
 
@@ -139,12 +143,51 @@ def _zapamietaj_ciasteczka(sesja: requests.Session, naglowki) -> None:
     (cookie), a wspolny sloik po stronie mostu mieszalby dwa rownolegle
     przebiegi."""
     for surowe in naglowki or []:
-        para = surowe.split(";", 1)[0].strip()
+        para, _, atrybuty = surowe.partition(";")
         if "=" not in para:
             continue
-        nazwa, wartosc = para.split("=", 1)
-        if nazwa.strip():
-            sesja.cookies.set(nazwa.strip(), wartosc.strip())
+        nazwa, wartosc = (x.strip() for x in para.split("=", 1))
+        if not nazwa:
+            continue
+        # Serwer kasuje ciasteczko, wysylajac je z Max-Age=0 albo z data
+        # wygasniecia w przeszlosci. requests.Session robi to sam; tu trzeba
+        # recznie, inaczej uniewazniona sesja wracalaby w kolejnych zadaniach.
+        # (Parsujemy recznie, nie SimpleCookie: CBOSA wysyla wartosci ze
+        # spacjami, np. pola-orzeczenia, ktore SimpleCookie po cichu gubi.)
+        if not wartosc or _ciasteczko_skasowane(atrybuty):
+            try:
+                del sesja.cookies[nazwa]
+            except KeyError:
+                pass
+            continue
+        sesja.cookies.set(nazwa, wartosc)
+
+
+def _ciasteczko_skasowane(atrybuty: str) -> bool:
+    """Czy atrybuty Set-Cookie kaza je usunac. Max-Age ma pierwszenstwo przed
+    Expires (RFC 6265, 5.3)."""
+    max_age, expires = None, None
+    for a in atrybuty.split(";"):
+        klucz, _, wartosc = a.strip().partition("=")
+        klucz = klucz.strip().lower()
+        if klucz == "max-age":
+            max_age = wartosc.strip()
+        elif klucz == "expires":
+            expires = wartosc.strip()
+    if max_age is not None:
+        try:
+            return int(max_age) <= 0
+        except ValueError:
+            return False
+    if expires:
+        try:
+            kiedy = parsedate_to_datetime(expires)
+        except (TypeError, ValueError):
+            return False
+        if kiedy.tzinfo is None:
+            kiedy = kiedy.replace(tzinfo=timezone.utc)
+        return kiedy <= datetime.now(timezone.utc)
+    return False
 
 
 def _przez_most(sesja: requests.Session, metoda: str, url: str, **kw) -> OdpowiedzMostu:
@@ -177,7 +220,10 @@ def _przez_most(sesja: requests.Session, metoda: str, url: str, **kw) -> Odpowie
         status = int(dane.get("status") or 0)
         lokalizacja = dane.get("lokalizacja") or ""
         if status in (301, 302, 303, 307, 308) and lokalizacja:
-            url = lokalizacja if lokalizacja.startswith("http") else BAZA_URL + lokalizacja
+            # urljoin, nie BAZA_URL + ...: Location wzgledne bez ukosnika
+            # („find?p=1") dawalo „https://orzeczenia.nsa.gov.plfind?p=1", ktore
+            # most odrzucal jako obcy host. requests.Session robi to samo.
+            url = urljoin(url, lokalizacja)
             metoda = "GET" if status in (301, 302, 303) else metoda
             kw = {}
             continue
@@ -518,10 +564,15 @@ def pobierz_szczegoly(sesja: requests.Session, doc_id: str, log_fn=None) -> dict
 
     # Tytul: "I FSK 45/21 - Wyrok NSA z 2024-09-25"
     tytul = (soup.title.get_text(strip=True) if soup.title else "")
-    sygnatura, rodzaj, sad_krotki, data = "", "", "", ""
     m = re.match(r"(.+?)\s*-\s*(Wyrok|Postanowienie|Uchwa\w+)\s+(.+?)\s+z\s+(\d{4}-\d{2}-\d{2})", tytul)
-    if m:
-        sygnatura, rodzaj, sad_krotki, data = m.group(1), m.group(2), m.group(3), m.group(4)
+    if not m:
+        # Strona bez tytulu orzeczenia to nie orzeczenie: przeciazenie, prace
+        # serwisowe, zmieniony szablon — CBOSA potrafi oddac to z kodem 200.
+        # Wczesniej zapisywalismy wtedy pusta date i sygnature sprawy
+        # POWIAZANEJ (wyroku I instancji) jako wlasna, nadpisujac dobry rekord.
+        raise BladCBOSA("Strona /doc/%s nie wyglada na orzeczenie (tytul: %r)"
+                        % (doc_id, tytul[:80]))
+    sygnatura, rodzaj, sad_krotki, data = m.group(1), m.group(2), m.group(3), m.group(4)
 
     pelny_tekst = soup.get_text(" ", strip=True)
     prawomocny = "orzeczenie prawomocne" in pelny_tekst.lower()
@@ -537,7 +588,7 @@ def pobierz_szczegoly(sesja: requests.Session, doc_id: str, log_fn=None) -> dict
 
     return {
         "id":              doc_id.upper(),
-        "sygnatura":       sygnatura or dane_meta.get("Sygn. powiązane", "")[:60],
+        "sygnatura":       sygnatura,
         "rodzaj":          rodzaj,
         "sad":             dane_meta.get("Sąd", "") or sad_krotki,
         "data_orzeczenia": data_orz,
