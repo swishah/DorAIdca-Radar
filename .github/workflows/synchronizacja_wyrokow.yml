@@ -30,6 +30,21 @@ on:
           10 dni, powstaje dziura, ktorej zwykly przebieg nigdy nie zobaczy.
         required: false
         default: ''
+      dni_uzasadnien:
+        description: >-
+          Ile dni wstecz dla strumienia uzasadnien. Puste = 180. Zejdz nizej
+          (np. 60) przy pierwszym nadrabianiu — kazdy dokument to kilkadziesiat
+          tysiecy znakow w bazie, wiec warto zaczac od wezszego okna.
+        required: false
+        default: ''
+      tylko_metadane:
+        description: 'Tryb lekki: 1 = bez tresci uzasadnien, 0 = z uzasadnieniami'
+        required: false
+        type: choice
+        options:
+          - '0'
+          - '1'
+        default: '0'
 
 jobs:
   synchronizuj-wyroki:
@@ -56,14 +71,29 @@ jobs:
           # nowym imporcie — requirements.txt nie moze.
           pip install -r requirements.txt
 
+      # MOST DO CBOSA — bez niego kazdy krok ponizej padnie na SSLEOFError.
+      # orzeczenia.nsa.gov.pl od 11.09.2026 odcina adresy runnerow GitHuba:
+      # TCP sie nawiazuje, po czym serwer zamyka polaczenie bez slowa, tak samo
+      # na porcie 80 i 443, dla Pythona, curla i openssl s_client, na obrazie
+      # ubuntu-24 i ubuntu-22. Po naszej stronie nie ma czego naprawiac, wiec
+      # zadania ida przez funkcje brzegowa Supabase (repozytorium infra,
+      # supabase/functions/most-cbosa), ktorej CBOSA odpowiada normalnie.
+      # Parser zostaje tutaj, w Pythonie — przez most ida tylko surowe zadania.
       - name: Kalibracja (bez zapisu do bazy)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.tryb == 'kalibracja'
+        env:
+          CBOSA_MOST_URL:    ${{ secrets.CBOSA_MOST_URL }}
+          CBOSA_MOST_KLUCZ:  ${{ secrets.CBOSA_MOST_KLUCZ }}
         run: python synchronizacja_wyrokow.py --kalibracja
 
       - name: Synchronizacja pelna (reczna)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.tryb == 'pelny'
         env:
+          CBOSA_MOST_URL:    ${{ secrets.CBOSA_MOST_URL }}
+          CBOSA_MOST_KLUCZ:  ${{ secrets.CBOSA_MOST_KLUCZ }}
+          WYROKI_TYLKO_METADANE: ${{ github.event.inputs.tylko_metadane }}
           WYROKI_OKNO_METADANE_DNI: ${{ github.event.inputs.dni_metadanych }}
+          WYROKI_OKNO_UZASADNIEN_DNI: ${{ github.event.inputs.dni_uzasadnien }}
           SUPABASE_HOST:     ${{ secrets.SUPABASE_HOST }}
           SUPABASE_PORT:     ${{ secrets.SUPABASE_PORT }}
           SUPABASE_DB:       ${{ secrets.SUPABASE_DB }}
@@ -74,6 +104,13 @@ jobs:
       - name: Synchronizacja pelna (harmonogram niedzielny)
         if: github.event_name == 'schedule'
         env:
+          CBOSA_MOST_URL:    ${{ secrets.CBOSA_MOST_URL }}
+          CBOSA_MOST_KLUCZ:  ${{ secrets.CBOSA_MOST_KLUCZ }}
+          # Niedzielny przebieg pobiera TRESCI uzasadnien (strumien 2).
+          # Do 22.09.2026 stala tu domyslna jedynka i strumien 2 byl po cichu
+          # wycinany z kazdego przebiegu — same metadane rosly, uzasadnienia
+          # nie dochodzily od 19.07.2026 i nikt tego nie widzial.
+          WYROKI_TYLKO_METADANE: '0'
           WYROKI_OKNO_METADANE_DNI: ${{ github.event.inputs.dni_metadanych }}
           SUPABASE_HOST:     ${{ secrets.SUPABASE_HOST }}
           SUPABASE_PORT:     ${{ secrets.SUPABASE_PORT }}

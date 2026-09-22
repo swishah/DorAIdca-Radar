@@ -34,6 +34,7 @@ SYMBOLE SPRAW (klasyfikacja sadowa) — filtr glowny:
   uruchomienie zweryfikuje te mape na zywych danych.
 """
 
+import os
 import re
 import time
 import requests
@@ -87,13 +88,97 @@ class BladCBOSA(Exception):
 
 
 # ---------------------------------------------------------------------------
+# MOST — obejscie blokady adresow GitHub Actions
+# ---------------------------------------------------------------------------
+# Od 11.09.2026 orzeczenia.nsa.gov.pl odcina adresy runnerow GitHuba: TCP sie
+# nawiazuje, po czym serwer zamyka polaczenie bez slowa. Tak samo na porcie 443
+# i 80, tak samo dla Pythona, curla i openssl s_client, tak samo na obrazie
+# ubuntu-24 i ubuntu-22 — czyli po naszej stronie nie ma czego naprawiac.
+# Z Dockera, z bazy Supabase i z funkcji brzegowej Supabase ten sam adres
+# odpowiada 200, a sasiedni www.nsa.gov.pl odpowiada nawet z runnera.
+#
+# Gdy CBOSA_MOST_URL jest ustawiony, zadania ida przez funkcje brzegowa
+# (supabase/functions/most-cbosa w repozytorium infra). Bez tej zmiennej — a
+# wiec w Dockerze i lokalnie — nic sie nie zmienia i ruch idzie wprost.
+MOST_URL   = (os.environ.get("CBOSA_MOST_URL") or "").strip()
+MOST_KLUCZ = (os.environ.get("CBOSA_MOST_KLUCZ") or "").strip()
+MAKS_PRZEKIEROWAN = 5
+
+
+class OdpowiedzMostu:
+    """Tyle z interfejsu requests.Response, ile uzywa reszta modulu."""
+
+    def __init__(self, status_code: int, text: str, url: str):
+        self.status_code = status_code
+        self.text = text
+        self.url = url
+
+
+def _ciasteczka_naglowek(sesja: requests.Session) -> str:
+    return "; ".join("%s=%s" % (n, w) for n, w in sesja.cookies.items())
+
+
+def _zapamietaj_ciasteczka(sesja: requests.Session, naglowki) -> None:
+    """Set-Cookie z mostu do sloika sesji — sloik zostaje po stronie Pythona.
+
+    Most celowo nie trzyma zadnego stanu: paginacja CBOSA zyje w sesji
+    (cookie), a wspolny sloik po stronie mostu mieszalby dwa rownolegle
+    przebiegi."""
+    for surowe in naglowki or []:
+        para = surowe.split(";", 1)[0].strip()
+        if "=" not in para:
+            continue
+        nazwa, wartosc = para.split("=", 1)
+        if nazwa.strip():
+            sesja.cookies.set(nazwa.strip(), wartosc.strip())
+
+
+def _przez_most(sesja: requests.Session, metoda: str, url: str, **kw) -> OdpowiedzMostu:
+    """Jedno zadanie do CBOSA przez funkcje brzegowa Supabase.
+
+    Przekierowania podazamy sami, bo most ich nie podaza (redirect: manual) —
+    inaczej zgubilby ciasteczko ustawione przez pierwszy skok."""
+    for _ in range(MAKS_PRZEKIEROWAN):
+        zlecenie = {
+            "metoda": metoda.upper(),
+            "url": url,
+            "agent": USER_AGENT,
+            "ciasteczka": _ciasteczka_naglowek(sesja),
+        }
+        if kw.get("data"):
+            zlecenie["dane"] = kw["data"]
+        r = requests.post(MOST_URL, json=zlecenie, timeout=TIMEOUT_S + 30,
+                          headers={"x-most-klucz": MOST_KLUCZ})
+        if r.status_code != 200:
+            raise requests.RequestException(
+                "most odpowiedzial HTTP %s: %s" % (r.status_code, r.text[:200]))
+        dane = r.json()
+        if dane.get("blad"):
+            raise requests.RequestException("most: %s" % dane["blad"])
+        _zapamietaj_ciasteczka(sesja, dane.get("ciasteczka"))
+
+        status = int(dane.get("status") or 0)
+        lokalizacja = dane.get("lokalizacja") or ""
+        if status in (301, 302, 303, 307, 308) and lokalizacja:
+            url = lokalizacja if lokalizacja.startswith("http") else BAZA_URL + lokalizacja
+            metoda = "GET" if status in (301, 302, 303) else metoda
+            kw = {}
+            continue
+        return OdpowiedzMostu(status, dane.get("tekst") or "", url)
+    raise requests.RequestException("most: przekroczono %d przekierowan" % MAKS_PRZEKIEROWAN)
+
+
+# ---------------------------------------------------------------------------
 # HTTP z ponowieniami
 # ---------------------------------------------------------------------------
 def _zadanie(sesja: requests.Session, metoda: str, url: str, log_fn=None, **kw):
     for proba in range(1, MAKS_PROB_HTTP + 1):
         try:
             time.sleep(PAUZA_S)
-            r = sesja.request(metoda, url, timeout=TIMEOUT_S, **kw)
+            if MOST_URL:
+                r = _przez_most(sesja, metoda, url, **kw)
+            else:
+                r = sesja.request(metoda, url, timeout=TIMEOUT_S, **kw)
             if r.status_code == 200:
                 return r
             if log_fn:

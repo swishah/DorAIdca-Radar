@@ -33,10 +33,11 @@ JAK MIERZY (dwa niezalezne sprawdzenia, celowo)
      bylby slepy dokladnie tam, gdzie ma patrzec.
 
 GDZIE URUCHAMIAC
-  Z Dockera albo z sieci biura. CBOSA od 11.09.2026 zrywa polaczenie TLS
-  z adresami GitHub Actions (SSLEOFError na /cbo/query), wiec audyt
-  uruchomiony w Actions zmierzy tylko wlasny brak dostepu — i tak wlasnie
-  to zglosi, zamiast udawac, ze jest czysto.
+  Z Dockera, z sieci biura — albo z Actions, o ile ustawione sa CBOSA_MOST_URL
+  i CBOSA_MOST_KLUCZ (audyt korzysta z wyroki_cbosa, wiec most dziala tu tak
+  samo jak w synchronizacji). CBOSA od 11.09.2026 odcina adresy runnerow
+  GitHuba, wiec audyt uruchomiony tam BEZ mostu zmierzy tylko wlasny brak
+  dostepu — i tak wlasnie to zglosi, zamiast udawac, ze jest czysto.
 
 Kod wyjscia: 0 gdy czysto, 1 gdy audyt znalazl luke albo nie mogl jej
 zmierzyc — zeby dalo sie go powiesic na alarmie.
@@ -244,7 +245,7 @@ def main():
             print("NIE MOZNA SIEGNAC DO CBOSA: %s" % e)
             print("Audyt uruchomiono z adresu, ktoremu CBOSA nie odpowiada — tak")
             print("wlasnie wyglada blokada GitHub Actions trwajaca od 11.09.2026.")
-            print("Uruchom go z Dockera albo z sieci biura.")
+            print("Uruchom go z Dockera albo ustaw CBOSA_MOST_URL i CBOSA_MOST_KLUCZ.")
             sys.exit(1)
 
         if not args.bez_listy:
