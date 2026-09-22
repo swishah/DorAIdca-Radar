@@ -12,16 +12,23 @@ name: Uzupelnianie archiwum z MF (nocne)
 #
 # GODZINY
 #   Cron GitHuba chodzi po UTC, a okno nocne jest polskie (00:45–05:15).
-#   Wybrane godziny mieszcza sie w nim i zima, i latem (UTC 23:45–03:15 to
-#   czesc wspolna obu przesuniec). Cztery przebiegi po 400 tresci = 1600,
-#   przyciete przez skrypt do 1500 na noc.
+#   Start 23:45 UTC miesci sie w nim i zima, i latem (UTC 23:45–03:15 to czesc
+#   wspolna obu przesuniec). Przebieg konczy sie, gdy wyczerpie 1500 tresci,
+#   dojdzie 03:00 UTC albo przekroczy cztery godziny — a przy 4–7 s na tresc
+#   1500 dokumentow zajmuje jakies 2,5 godziny, wiec limit zadania (6 godzin)
+#   jest daleko.
 
 on:
   schedule:
+    # JEDEN przebieg na noc, nie cztery.
+    #
+    # W nocy 21/22.09.2026 z czterech zaplanowanych wystartowal JEDEN,
+    # a synchronizacja dzienna spoznila sie o 2 godziny 41 minut. GitHub
+    # uruchamia zadania z harmonogramu „w miare mozliwosci" i pod obciazeniem
+    # potrafi je opoznic albo pominac — cztery sloty to cztery okazje do
+    # przepadniecia, jeden to jedna. Skrypt sam obchodzi kolejne miesiace,
+    # az wyczerpie nocny budzet 1500 tresci albo dojdzie 03:00 UTC.
     - cron: '45 23 * * *'
-    - cron: '45 0 * * *'
-    - cron: '45 1 * * *'
-    - cron: '45 2 * * *'
   workflow_dispatch:
     inputs:
       maks:

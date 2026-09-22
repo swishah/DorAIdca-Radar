@@ -52,8 +52,15 @@ def utils_kody() -> dict:
     return dict(utils.KODY_PRZEPISOW)
 
 KLUCZ = "uzupelnianie_mf"
-MAKS_PRZEBIEGU = 400          # tresci na jeden przebieg
-MAKS_NOCY = 1500              # tresci na jedna noc (suma przebiegow)
+MAKS_PRZEBIEGU = 400          # tresci na jedno okno (miesiac)
+MAKS_NOCY = 1500              # tresci na jedna noc (suma okien)
+
+# Jedno zadanie obchodzi kolejne okna, az wyczerpie budzet nocy. Dwa
+# bezpieczniki, zeby nie wyjsc poza noc i poza limit zadania u GitHuba
+# (6 godzin): najpozniejsza godzina UTC, o ktorej wolno ZACZAC nowe okno,
+# i twardy limit dlugosci calego przebiegu.
+KONIEC_OKNA_UTC = 3           # 03:00 UTC = 05:00 czasu polskiego latem
+MAKS_DLUGOSC = timedelta(hours=4)
 WSTRZYMANIE = timedelta(hours=24)
 HISTORIA = 15
 
@@ -116,6 +123,21 @@ def zanotuj_pobranie(db, podatek: str, miesiac: str, ile: int) -> None:
         (podatek, miesiac, ile))
 
 
+def odloz_czesc(numer: int) -> None:
+    """Odklada wynik jednego okna pod wlasna nazwa.
+
+    uzupelnianie_mf zapisuje zawsze wynik.json i dokumenty.json.gz, wiec bez
+    tego kazde kolejne okno kasowaloby poprzednie i artefakt niosl by tylko
+    ostatni miesiac. Numerowane czesci odbiera wykonawca w Dockerze
+    (zadania/uzupelnianie.py, rozpakuj)."""
+    katalog = uzupelnianie_mf.KATALOG
+    for nazwa, nowa in (("wynik.json", "czesc-%02d-wynik.json" % numer),
+                        ("dokumenty.json.gz", "czesc-%02d-dokumenty.json.gz" % numer)):
+        stara = os.path.join(katalog, nazwa)
+        if os.path.exists(stara):
+            os.replace(stara, os.path.join(katalog, nowa))
+
+
 def pobrane_tej_nocy(stan: dict, t: datetime) -> int:
     noc = stan.get("noc") or {}
     return noc.get("pobrane", 0) if noc.get("data") == t.astimezone(PL).date().isoformat() else 0
@@ -153,69 +175,110 @@ def main() -> int:
         print("Budzet nocy wyczerpany (%d tresci). Koniec na dzis." % MAKS_NOCY)
         return 0
 
-    okno = nastepne_okno(db)
-    if not okno:
-        zapisz(db, {"ukonczono": t.isoformat()})
-        print("Nie ma czego uzupelniac — archiwum kompletne wedlug audytu.")
-        return 0
+    start = t
+    # Reczne uruchomienie z podanym limitem robi JEDNO okno — sluzy do
+    # sprawdzenia, nie do nadrabiania. Zapamietujemy przed petla, bo w srodku
+    # sami wpisujemy MAKS_DOK dla kazdego okna.
+    jedno_okno = bool(os.environ.get("MAKS_DOK"))
+    reczny_limit = int(os.environ.get("MAKS_DOK") or 0)
+    # Do ktorej godziny wolno ZACZYNAC nowe okno. Liczone od startu, wiec
+    # przebieg reczny w dzien nie konczy sie po pierwszym miesiacu.
+    koniec_nocy = start.replace(hour=KONIEC_OKNA_UTC, minute=0, second=0, microsecond=0)
+    if koniec_nocy <= start:
+        koniec_nocy += timedelta(days=1)
+    okien, pobrane_lacznie = 0, 0
+    while budzet > 0:
+        teraz = datetime.now(timezone.utc)
+        # Nowego okna nie zaczynamy po godzinie zamkniecia nocy ani po czterech
+        # godzinach pracy — biezace okno zawsze konczymy w calosci, bo urwane
+        # pobieranie to zmarnowany ruch u MF.
+        if okien and teraz >= koniec_nocy:
+            print("Koniec okna nocnego (%02d:00 UTC) — nie zaczynam kolejnego miesiaca."
+                  % KONIEC_OKNA_UTC)
+            break
+        if teraz - start > MAKS_DLUGOSC:
+            print("Przebieg trwa juz ponad %s — konczę." % MAKS_DLUGOSC)
+            break
 
-    kod, miesiac, od, do, brakuje = okno
-    if not przepisy.get(kod):
-        print("Brak numeru przepisu dla podatku %s — pomijam." % kod)
-        return 0
-    maks = min(int(os.environ.get("MAKS_DOK") or MAKS_PRZEBIEGU), MAKS_PRZEBIEGU, budzet)
-    print("Okno: %s %s (brakuje %d), najwyzej %d tresci (budzet nocy: %d)."
-          % (kod, miesiac, brakuje, maks, budzet))
-    if sucho:
-        print("SUCHO=1 — koncze bez pytania MF.")
-        return 0
+        okno = nastepne_okno(db)
+        if not okno:
+            zapisz(db, {"ukonczono": teraz.isoformat()})
+            print("Nie ma czego uzupelniac — archiwum kompletne wedlug audytu.")
+            break
 
-    # uzupelnianie_mf czyta wejscie ze srodowiska — ta sama droga co przy
-    # zleceniu z Dockera, wiec pobieranie zachowuje sie identycznie.
-    os.environ["PODATEK"] = kod
-    os.environ["PRZEPIS"] = str(przepisy[kod])
-    os.environ["OD"], os.environ["DO"] = od, do
-    os.environ["MAKS_DOK"] = str(maks)
-    try:
-        uzupelnianie_mf.main()
-    except SystemExit as e:                      # zle wejscie — plan jest chory
-        zapisz(db, {"blad": "uzupelnianie_mf: %s" % str(e)[:300],
-                    "wstrzymane_do": (t + WSTRZYMANIE).isoformat(),
-                    "powod": "blad wejscia %s %s..%s" % (kod, od, do)})
-        raise
+        kod, miesiac, od, do, brakuje = okno
+        if not przepisy.get(kod):
+            print("Brak numeru przepisu dla podatku %s — pomijam." % kod)
+            break
 
-    with open(os.path.join(uzupelnianie_mf.KATALOG, "wynik.json"), encoding="utf-8") as f:
-        wynik = json.load(f)
+        maks = min(reczny_limit or MAKS_PRZEBIEGU, MAKS_PRZEBIEGU, budzet)
+        print("\n[okno %d] %s %s (brakuje %d), najwyzej %d tresci (budzet nocy: %d)."
+              % (okien + 1, kod, miesiac, brakuje, maks, budzet))
+        if sucho:
+            print("SUCHO=1 — koncze bez pytania MF.")
+            return 0
 
-    status = wynik.get("status") or "?"
-    pobrane = wynik.get("pobrane", 0)
-    # Audyt jest teraz pamiecia postepu: dopisujemy, ile z tego miesiaca
-    # pobralismy. Gdy Docker w koncu policzy swoje, jego liczba rozstrzyga.
-    zanotuj_pobranie(db, kod, miesiac, pobrane)
-    pod = podatki.get(kod)
-    if pod is not None:
-        pod["pobrane"] = pod.get("pobrane", 0) + pobrane
-        pod["status"], pod["ostatnio"] = status, t.isoformat()
+        # uzupelnianie_mf czyta wejscie ze srodowiska — ta sama droga co przy
+        # zleceniu z Dockera, wiec pobieranie zachowuje sie identycznie.
+        os.environ["PODATEK"] = kod
+        os.environ["PRZEPIS"] = str(przepisy[kod])
+        os.environ["OD"], os.environ["DO"] = od, do
+        os.environ["MAKS_DOK"] = str(maks)
+        try:
+            uzupelnianie_mf.main()
+        except SystemExit as e:                  # zle wejscie — plan jest chory
+            zapisz(db, {"blad": "uzupelnianie_mf: %s" % str(e)[:300],
+                        "wstrzymane_do": (teraz + WSTRZYMANIE).isoformat(),
+                        "powod": "blad wejscia %s %s..%s" % (kod, od, do)})
+            raise
 
-    zmiany = {
-        "podatki": podatki,
-        "noc": {"data": t.astimezone(PL).date().isoformat(),
-                "pobrane": pobrane_tej_nocy(stan, t) + pobrane},
-        "historia": ([{"kiedy": t.isoformat(), "podatek": kod, "miesiac": miesiac,
-                       "od": od, "do": do,
-                       "status": status, "lista": wynik.get("lista"), "pobrane": pobrane,
-                       "przebieg": os.environ.get("GITHUB_RUN_ID", "")}]
-                     + (stan.get("historia") or []))[:HISTORIA],
-        "blad": "",
-    }
-    # Oznaka blokady albo niepelna lista = doba przerwy. MF wazniejsze od tempa:
-    # blokada adresow GitHuba zatrzymalaby takze codzienna synchronizacje.
-    if status in ("BLOKADA", "NIEPELNA_LISTA"):
-        zmiany["wstrzymane_do"] = (t + WSTRZYMANIE).isoformat()
-        zmiany["powod"] = "%s — %s %s..%s" % (status, kod, od, do)
-        print("Status %s — wstrzymuje uzupelnianie na dobe." % status)
-    zapisz(db, zmiany)
-    print("Zapisano stan: %s %s, status %s, pobrane %d." % (kod, miesiac, status, pobrane))
+        with open(os.path.join(uzupelnianie_mf.KATALOG, "wynik.json"), encoding="utf-8") as f:
+            wynik = json.load(f)
+        odloz_czesc(okien + 1)
+
+        status = wynik.get("status") or "?"
+        pobrane = wynik.get("pobrane", 0)
+        okien += 1
+        pobrane_lacznie += pobrane
+        budzet -= pobrane
+
+        # Audyt jest pamiecia postepu: dopisujemy, ile z tego miesiaca
+        # pobralismy. Gdy Docker w koncu policzy swoje, jego liczba rozstrzyga.
+        zanotuj_pobranie(db, kod, miesiac, pobrane)
+        pod = podatki.get(kod)
+        if pod is not None:
+            pod["pobrane"] = pod.get("pobrane", 0) + pobrane
+            pod["status"], pod["ostatnio"] = status, teraz.isoformat()
+
+        stan = wczytaj(db)
+        zmiany = {
+            "podatki": podatki,
+            "noc": {"data": teraz.astimezone(PL).date().isoformat(),
+                    "pobrane": pobrane_tej_nocy(stan, teraz) + pobrane},
+            "historia": ([{"kiedy": teraz.isoformat(), "podatek": kod, "miesiac": miesiac,
+                           "od": od, "do": do,
+                           "status": status, "lista": wynik.get("lista"), "pobrane": pobrane,
+                           "przebieg": os.environ.get("GITHUB_RUN_ID", "")}]
+                         + (stan.get("historia") or []))[:HISTORIA],
+            "blad": "",
+        }
+        # Oznaka blokady albo niepelna lista = doba przerwy i koniec nocy.
+        # MF wazniejsze od tempa: blokada adresow GitHuba zatrzymalaby takze
+        # codzienna synchronizacje.
+        if status in ("BLOKADA", "NIEPELNA_LISTA"):
+            zmiany["wstrzymane_do"] = (teraz + WSTRZYMANIE).isoformat()
+            zmiany["powod"] = "%s — %s %s" % (status, kod, miesiac)
+            zapisz(db, zmiany)
+            print("Status %s — wstrzymuje uzupelnianie na dobe i koncze noc." % status)
+            break
+        zapisz(db, zmiany)
+        print("[okno %d] %s %s: status %s, pobrane %d." % (okien, kod, miesiac, status, pobrane))
+
+        if jedno_okno:
+            break
+
+    print("\nNoc: %d okien, pobrane %d tresci (budzet %d)."
+          % (okien, pobrane_lacznie, MAKS_NOCY))
     return 0
 
 
