@@ -12,7 +12,10 @@ OSTROŻNIE Z MF — PRIORYTET PONAD SZYBKOŚĆ
   Blokada adresów GitHuba zatrzymałaby też codzienną synchronizację, dlatego:
   - lista dokumentów idzie tą samą funkcją co w synchronizacji dziennej
     (pauza 1,5 s między stronami wyników);
-  - treści pobieramy po jednej, z przerwą 4–7 s, nigdy równolegle;
+  - treści pobieramy po jednej, z przerwą 8–12 s, nigdy równolegle
+    (od 25.09.2026 wolniej: blokady przychodziły już po 59–400 treściach);
+  - NIE pobieramy treści, które już mamy (ZNANE) — wcześniej każdy przebieg
+    ściągał cały miesiąc od nowa, także duplikaty;
   - pierwsza oznaka blokady (429, 403, 5xx, brak odpowiedzi) kończy przebieg
     od razu i bez ponawiania — wykonawca wstrzymuje wtedy uzupełnianie na dobę;
   - najwyżej MAKS_DOK treści w przebiegu, liczone pełnymi dniami.
@@ -22,6 +25,8 @@ WEJŚCIE (zmienne środowiskowe)
   PRZEPIS   ID ustawy w słowniku EUREKI; puste = wbudowany podatek (utils.KODY_PRZEPISOW)
   OD, DO    okno dat wydania, RRRR-MM-DD
   MAKS_DOK  najwięcej treści w przebiegu (1–1000)
+  ZNANE     opcjonalnie: plik JSON z listą ID, które już mamy — pomijane bez
+            pytania MF o treść
 
 WYJŚCIE
   wynik/wynik.json         status, liczby, nastepne_od — od tej daty wykonawca
@@ -41,7 +46,7 @@ import requests
 
 import utils
 
-PRZERWA_MIN_S, PRZERWA_MAX_S = 4.0, 7.0
+PRZERWA_MIN_S, PRZERWA_MAX_S = 8.0, 12.0
 KATALOG = "wynik"
 
 
@@ -61,6 +66,14 @@ def _wejscie() -> tuple:
     return podatek, kod, od, do, maks
 
 
+def _znane() -> set:
+    plik = os.environ.get("ZNANE", "").strip()
+    if not plik or not os.path.exists(plik):
+        return set()
+    with open(plik, encoding="utf-8") as f:
+        return {str(x) for x in json.load(f)}
+
+
 def _zapisz(wynik: dict, dokumenty: list) -> None:
     os.makedirs(KATALOG, exist_ok=True)
     with gzip.open(os.path.join(KATALOG, "dokumenty.json.gz"), "wt", encoding="utf-8") as f:
@@ -73,7 +86,9 @@ def _zapisz(wynik: dict, dokumenty: list) -> None:
 def main() -> None:
     podatek, kod, od, do, maks = _wejscie()
     wynik = {"podatek": podatek, "od": od, "do": do, "status": "OK",
-             "lista": 0, "pobrane": 0, "brak_tresci": 0, "nastepne_od": None}
+             "lista": 0, "pobrane": 0, "brak_tresci": 0, "znane": 0,
+             "nastepne_od": None}
+    znane = _znane()
     dokumenty = []
     with requests.Session() as sesja:
         lista, status = utils.pobierz_wszystko_z_okresu(od, do, sesja, podatek, kod, log_fn=print)
@@ -93,6 +108,9 @@ def main() -> None:
                 wynik["status"], wynik["nastepne_od"] = "LIMIT", d["data"]
                 break
             poprzedni_dzien = d["data"]
+            if str(d["id"]) in znane:
+                wynik["znane"] += 1
+                continue
             time.sleep(random.uniform(PRZERWA_MIN_S, PRZERWA_MAX_S))
             tekst, st = utils.pobierz_tekst_pdf(d["id"], sesja=sesja)
             if st == "BLOKADA":

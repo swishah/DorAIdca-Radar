@@ -20,6 +20,18 @@ CO SIE ZMIENILO
   TRESCI INTERPRETACJI NADAL OMIJAJA CHMURE. Do Supabase idzie wylacznie plan
   (kilka kilobajtow); dokumenty jada artefaktem GitHuba prosto do Dockera.
 
+OD 25.09.2026 (decyzja wlasciciela: „mniej, ale rowno", od najnowszych,
+bez obchodzenia limitow MF):
+  - miesiace OD NAJNOWSZYCH — swieze lata sa najbardziej przydatne w pracy;
+  - KURSOR per podatek i miesiac (plan: kursory): przebieg przerwany limitem
+    albo blokada wznawia sie od dnia, na ktorym stanal, a miesiac zakonczony
+    ("KONIEC") nie wraca. Wczesniej kazda noc brala miesiac od 1. dnia:
+    PIT 01.2023 noc w noc sciagal te same ~400 tresci i dostawal blokade
+    (23.09: 362 pobrane, 25.09: 59 duplikatow i BLOKADA);
+  - ZNANE: ID, ktore chmura juz ma w tym oknie, nie sa pobierane ponownie
+    (do chmury idzie tylko zapytanie o ID, bez tresci);
+  - 300 tresci na noc, 8–12 s przerwy (uzupelnianie_mf.py).
+
 OSTROZNOSC WOBEC MF — bez zmian, tylko pilnuje jej ten skrypt zamiast Dockera:
   - tylko w oknie nocnym (harmonogram workflowu), z dala od synchronizacji;
   - najwyzej MAKS_PRZEBIEGU tresci na przebieg i MAKS_NOCY na noc;
@@ -52,8 +64,9 @@ def utils_kody() -> dict:
     return dict(utils.KODY_PRZEPISOW)
 
 KLUCZ = "uzupelnianie_mf"
-MAKS_PRZEBIEGU = 400          # tresci na jedno okno (miesiac)
-MAKS_NOCY = 1500              # tresci na jedna noc (suma okien)
+MAKS_PRZEBIEGU = 300          # tresci na jedno okno (miesiac)
+MAKS_NOCY = 300               # tresci na jedna noc (suma okien)
+KONIEC = "KONIEC"             # kursor miesiaca zakonczonego
 
 # Jedno zadanie obchodzi kolejne okna, az wyczerpie budzet nocy. Dwa
 # bezpieczniki, zeby nie wyjsc poza noc i poza limit zadania u GitHuba
@@ -95,8 +108,11 @@ def zapisz(db, zmiany: dict) -> None:
         (KLUCZ, json.dumps(zmiany, ensure_ascii=False)))
 
 
-def nastepne_okno(db, pomin=()):
-    """(podatek, miesiac, od, do, brakuje) — najstarszy miesiac z brakiem.
+def nastepne_okno(db, pomin=(), kursory=None):
+    """(podatek, miesiac, od, do, brakuje) — NAJNOWSZY miesiac z brakiem.
+
+    Miesiac z kursorem KONIEC jest pomijany; z kursorem-data okno zaczyna sie
+    od tej daty zamiast od 1. dnia miesiaca.
 
     Braki liczy widok braki_archiwum: EUREKA ma wiecej niz GREATEST(w_bazie,
     pobrane_nocami). Drugi skladnik jest konieczny, bo Docker potwierdza stan
@@ -108,17 +124,30 @@ def nastepne_okno(db, pomin=()):
     wracal w kazdym obrocie petli: pobrane=0 nie zmniejsza budzetu ani braku,
     wiec noc krecila sie w kolko na jednym zapytaniu do MF przez cztery godziny.
     """
+    kursory = kursory or {}
+    zamkniete = [k for k, v in kursory.items() if v == KONIEC]
     w = db.wykonaj("""SELECT podatek, miesiac, brakuje FROM braki_archiwum
                       WHERE NOT (podatek || '|' || miesiac = ANY(%s))
-                      ORDER BY miesiac, podatek LIMIT 1""",
-                   (list(pomin),), fetch=True) or []
+                      ORDER BY miesiac DESC, podatek LIMIT 1""",
+                   (list(pomin) + zamkniete,), fetch=True) or []
     if not w:
         return None
     podatek, miesiac, brakuje = w[0]["podatek"], w[0]["miesiac"], w[0]["brakuje"]
     rok, mies = int(miesiac[:4]), int(miesiac[5:7])
     nastepny = date(rok + (mies == 12), 1 if mies == 12 else mies + 1, 1)
-    return (podatek, miesiac, "%s-01" % miesiac,
-            (nastepny - timedelta(days=1)).isoformat(), brakuje)
+    od = kursory.get("%s|%s" % (podatek, miesiac)) or "%s-01" % miesiac
+    return (podatek, miesiac, od, (nastepny - timedelta(days=1)).isoformat(), brakuje)
+
+
+def zapisz_znane(db, podatek: str, od: str, do: str) -> str:
+    """ID interpretacji z tego okna, ktore chmura juz ma — same ID, bez tresci."""
+    w = db.wykonaj("""SELECT id FROM dokumenty
+                      WHERE upper(podatek) = %s AND left(data_wyd, 10) BETWEEN %s AND %s""",
+                   (podatek, od, do), fetch=True) or []
+    plik = "znane.json"
+    with open(plik, "w", encoding="utf-8") as f:
+        json.dump([str(x["id"]) for x in w], f)
+    return plik
 
 
 def zanotuj_pobranie(db, podatek: str, miesiac: str, ile: int) -> None:
@@ -194,6 +223,7 @@ def main() -> int:
     koniec_nocy = start.replace(hour=KONIEC_OKNA_UTC, minute=0, second=0, microsecond=0)
     if koniec_nocy <= start:
         koniec_nocy += timedelta(days=1)
+    kursory = dict(stan.get("kursory") or {})
     okien, pobrane_lacznie = 0, 0
     odwiedzone = []          # kazdy miesiac najwyzej raz na noc — patrz nastepne_okno
     while budzet > 0:
@@ -209,7 +239,7 @@ def main() -> int:
             print("Przebieg trwa juz ponad %s — konczę." % MAKS_DLUGOSC)
             break
 
-        okno = nastepne_okno(db, odwiedzone)
+        okno = nastepne_okno(db, odwiedzone, kursory)
         if not okno:
             if odwiedzone:
                 print("Kazdy miesiac z brakiem byl juz tej nocy odwiedzony — koniec.")
@@ -237,6 +267,7 @@ def main() -> int:
         os.environ["PRZEPIS"] = str(przepisy[kod])
         os.environ["OD"], os.environ["DO"] = od, do
         os.environ["MAKS_DOK"] = str(maks)
+        os.environ["ZNANE"] = zapisz_znane(db, kod, od, do)
         try:
             uzupelnianie_mf.main()
         except SystemExit as e:                  # zle wejscie — plan jest chory
@@ -263,14 +294,24 @@ def main() -> int:
             pod["pobrane"] = pod.get("pobrane", 0) + pobrane
             pod["status"], pod["ostatnio"] = status, teraz.isoformat()
 
+        # Kursor: zakonczony miesiac nie wraca, przerwany wznawia sie od dnia,
+        # na ktorym stanal — nie od 1. dnia miesiaca.
+        klucz_okna = "%s|%s" % (kod, miesiac)
+        if status == "OK":
+            kursory[klucz_okna] = KONIEC
+        elif wynik.get("nastepne_od"):
+            kursory[klucz_okna] = wynik["nastepne_od"]
+
         stan = wczytaj(db)
         zmiany = {
+            "kursory": kursory,
             "podatki": podatki,
             "noc": {"data": teraz.astimezone(PL).date().isoformat(),
                     "pobrane": pobrane_tej_nocy(stan, teraz) + pobrane},
             "historia": ([{"kiedy": teraz.isoformat(), "podatek": kod, "miesiac": miesiac,
                            "od": od, "do": do,
                            "status": status, "lista": wynik.get("lista"), "pobrane": pobrane,
+                           "znane": wynik.get("znane", 0),
                            "przebieg": os.environ.get("GITHUB_RUN_ID", "")}]
                          + (stan.get("historia") or []))[:HISTORIA],
             "blad": "",
