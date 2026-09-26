@@ -414,9 +414,20 @@ _RE_LICZBA = [
 
 
 def _parsuj_liste(html: str):
-    """Z listy wynikow wyciaga [(id, tytul), ...] oraz laczna liczbe (lub None)."""
+    """
+    Z listy wynikow wyciaga [(id, tytul), ...], laczna liczbe (lub None)
+    i liczbe WYNIKOW GLOWNYCH na tej stronie.
+
+    Lista zawiera tez odnosniki do orzeczen POWIAZANYCH (np. wyrok WSA pod
+    wyrokiem NSA, <span class="powiazane">). Zbieramy je jak dotad, ale do
+    stronicowania liczy sie tylko wyniki glowne: CBOSA podaje „Znaleziono N"
+    i dzieli na strony po 10 wlasnie wynikow glownych. Do 26.09.2026 liczylismy
+    wszystkie odnosniki razem i konczylismy za wczesnie — np. 51 wynikow
+    (6 stron) i koniec po 4 stronach, bo 69 odnosnikow > 51.
+    """
     soup = BeautifulSoup(html, "lxml")
     wyniki, widziane = [], set()
+    glownych = 0
     for a in soup.find_all("a", href=True):
         m = _RE_DOC.search(a["href"])
         if not m:
@@ -426,6 +437,8 @@ def _parsuj_liste(html: str):
             continue
         widziane.add(did)
         wyniki.append((did, a.get_text(" ", strip=True)))
+        if a.find_parent("span", class_="powiazane") is None:
+            glownych += 1
 
     tekst = soup.get_text(" ", strip=True)
     total = None
@@ -437,7 +450,7 @@ def _parsuj_liste(html: str):
                 break
             except ValueError:
                 pass
-    return wyniki, total
+    return wyniki, total, glownych
 
 
 def szukaj(sesja: requests.Session, formularz: dict, symbol: str,
@@ -455,7 +468,7 @@ def szukaj(sesja: requests.Session, formularz: dict, symbol: str,
     dane = zbuduj_zapytanie(formularz, symbol, data_od, data_do,
                             tylko_z_uzasadnieniem, tylko_prawomocne)
     r = _zadanie(sesja, "POST", formularz["akcja"], log_fn=log_fn, data=dane)
-    wyniki, total = _parsuj_liste(r.text)
+    wyniki, total, glownych = _parsuj_liste(r.text)
 
     odfiltrowane = 0
 
@@ -471,35 +484,36 @@ def szukaj(sesja: requests.Session, formularz: dict, symbol: str,
                 ok.append((i, t))
         return ok
 
-    strona_poz = len(wyniki)          # surowa liczba pozycji na stronie (do paginacji)
     wyniki_f = _przefiltruj(wyniki)
     if log_fn:
-        t = f"/{total}" if total is not None else ""
-        log_fn(f"    [strona 1] {strona_poz} pozycji, po filtrze rodzaju: {len(wyniki_f)}{t and ''}")
+        log_fn(f"    [strona 1] {glownych} wynikow (+{len(wyniki) - glownych} powiazanych), "
+               f"po filtrze rodzaju: {len(wyniki_f)}" + (f"; razem {total}" if total is not None else ""))
 
     wszystkie = list(wyniki_f)
     widziane = {i for i, _ in wyniki}          # dedup po SUROWYCH id (takze pominietych)
-    przewinieto = strona_poz                   # ile pozycji listy juz obejrzano
+    # Stronicowanie po WYNIKACH GLOWNYCH — tylko je liczy „Znaleziono N"
+    # (patrz _parsuj_liste). Powiazane zbieramy, ale nie przesuwaja licznika.
+    przewinieto = glownych
     strona = 2
     while strona <= MAKS_STRON:
         if total is not None and przewinieto >= total:
             break
-        if strona_poz == 0:            # pusta strona = koniec
+        if glownych == 0:              # strona bez wynikow glownych = koniec
             break
         r = _zadanie(sesja, "GET", f"{FIND_URL}?p={strona}", log_fn=log_fn)
-        wyniki, _ = _parsuj_liste(r.text)
+        wyniki, _, glownych = _parsuj_liste(r.text)
         nowe = [(i, t) for i, t in wyniki if i not in widziane]
         if not nowe:                   # strona bez nowych pozycji = koniec/petla
             break
         for i, _t in nowe:
             widziane.add(i)
-        strona_poz = len(nowe)
-        przewinieto += len(nowe)
+        przewinieto += glownych
         nowe_f = _przefiltruj(nowe)
         wszystkie.extend(nowe_f)
         if log_fn:
-            log_fn(f"    [strona {strona}] +{len(nowe)} pozycji (+{len(nowe_f)} po filtrze; "
-                   f"przewinieto {przewinieto}" + (f"/{total}" if total is not None else "") + ")")
+            log_fn(f"    [strona {strona}] +{glownych} wynikow, +{len(nowe)} nowych pozycji "
+                   f"(+{len(nowe_f)} po filtrze; przewinieto {przewinieto}"
+                   + (f"/{total}" if total is not None else "") + ")")
         strona += 1
 
     if log_fn and odfiltrowane:
