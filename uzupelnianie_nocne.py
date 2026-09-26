@@ -32,6 +32,13 @@ bez obchodzenia limitow MF):
     (do chmury idzie tylko zapytanie o ID, bez tresci);
   - 300 tresci na noc, 8–12 s przerwy (uzupelnianie_mf.py).
 
+  OKRES STRESZCZEN (od 26.09.2026): dokumenty wydane od progu streszczen
+  (utils.data_start — 15.07.2026, PCC 3.08.2026) trafiaja TAKZE do chmury,
+  tymi samymi kolumnami co w synchronizacji dziennej. Automat streszczen
+  dziala w chmurze i widzi tylko jej dokumenty — pobrane wylacznie do Dockera
+  czekaly w kolejce „u Gemini" bez konca (71 szt. z 08.2026, 26.09.2026).
+  Starsze treści dalej omijaja chmure (limit 500 MB).
+
 OSTROZNOSC WOBEC MF — bez zmian, tylko pilnuje jej ten skrypt zamiast Dockera:
   - tylko w oknie nocnym (harmonogram workflowu), z dala od synchronizacji;
   - najwyzej MAKS_PRZEBIEGU tresci na przebieg i MAKS_NOCY na noc;
@@ -49,6 +56,7 @@ WYJSCIE
   bez artefaktu.
 """
 
+import gzip
 import json
 import os
 import sys
@@ -175,6 +183,32 @@ def odloz_czesc(numer: int) -> None:
             os.replace(stara, os.path.join(katalog, nowa))
 
 
+def do_chmury_okres_streszczen(db, podatek: str) -> int:
+    """Dokumenty biezacego okna wydane od progu streszczen -> chmura.
+
+    Te same kolumny co db_core.zapisz_wiele_do_archiwum (synchronizacja
+    dzienna); pobrano_at = dzien wydania, jak przy wgrywaniu do Dockera
+    (zestawienie tygodniowe wybiera po pobrano_at). ON CONFLICT DO NOTHING —
+    to, co chmura juz ma, zostaje nietkniete. Zwraca liczbe wyslanych."""
+    plik = os.path.join(uzupelnianie_mf.KATALOG, "dokumenty.json.gz")
+    if not os.path.exists(plik):
+        return 0
+    with gzip.open(plik, "rt", encoding="utf-8") as f:
+        dokumenty = json.load(f)
+    teraz = datetime.now().isoformat(timespec="seconds")
+    # Próg z podatku DOKUMENTU (PCC ma własny), okno podaje go tylko domyślnie.
+    dane = [(str(d["id"]), d["sygnatura"], d["podatek"], d["data_wyd"], d["link"], d["tekst"],
+             d.get("format_zr") or "HTML+PDF", "uzupelnianie_mf", teraz, str(d["data_wyd"])[:10])
+            for d in dokumenty
+            if str(d.get("data_wyd") or "")[:10] >= utils.data_start(d.get("podatek") or podatek)]
+    if dane:
+        db.wykonaj_wiele(
+            """INSERT INTO dokumenty (id, sygnatura, podatek, data_wyd, link, tekst, format_zr,
+                                      pobrano_kto, pobrano_dt, pobrano_at)
+               VALUES %s ON CONFLICT (id) DO NOTHING""", dane)
+    return len(dane)
+
+
 def pobrane_tej_nocy(stan: dict, t: datetime) -> int:
     noc = stan.get("noc") or {}
     return noc.get("pobrane", 0) if noc.get("data") == t.astimezone(PL).date().isoformat() else 0
@@ -278,6 +312,14 @@ def main() -> int:
 
         with open(os.path.join(uzupelnianie_mf.KATALOG, "wynik.json"), encoding="utf-8") as f:
             wynik = json.load(f)
+        # Przed odlozeniem czesci (odloz_czesc zmienia nazwy plikow).
+        try:
+            do_chmury = do_chmury_okres_streszczen(db, kod)
+        except Exception as e:                   # noc idzie dalej; Docker i tak dostanie artefakt
+            do_chmury = 0
+            print("Zapis do chmury (okres streszczen) nie wyszedl: %s" % str(e)[:200])
+        if do_chmury:
+            print("Do chmury (okres streszczen, dla automatu): %d." % do_chmury)
         odloz_czesc(okien + 1)
 
         status = wynik.get("status") or "?"
@@ -311,7 +353,7 @@ def main() -> int:
             "historia": ([{"kiedy": teraz.isoformat(), "podatek": kod, "miesiac": miesiac,
                            "od": od, "do": do,
                            "status": status, "lista": wynik.get("lista"), "pobrane": pobrane,
-                           "znane": wynik.get("znane", 0),
+                           "znane": wynik.get("znane", 0), "do_chmury": do_chmury,
                            "przebieg": os.environ.get("GITHUB_RUN_ID", "")}]
                          + (stan.get("historia") or []))[:HISTORIA],
             "blad": "",
