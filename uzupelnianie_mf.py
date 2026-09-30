@@ -55,7 +55,7 @@ def _wejscie() -> tuple:
     przepis = os.environ.get("PRZEPIS", "").strip()
     od = os.environ.get("OD", "").strip()
     do = os.environ.get("DO", "").strip()
-    if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,11}", podatek):
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,15}", podatek):
         raise SystemExit("Zły skrót podatku: %r" % podatek)
     kod = int(przepis) if przepis.isdigit() else utils.KODY_PRZEPISOW.get(podatek)
     if not kod:
