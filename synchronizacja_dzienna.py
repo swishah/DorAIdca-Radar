@@ -162,6 +162,8 @@ def _okna(tryb: str, dodane: list) -> tuple:
         data_do = datetime.now()
         start = datetime.strptime(utils.data_start(kod), "%Y-%m-%d")
         data_od = max(start, data_do - timedelta(days=MAKS_OKNO_PODATKU_DNI - 1))
+        if utils.KATEGORIA_JST in utils.kategorie_podatku(kod):
+            data_od = start      # interpretacje gmin: calosc od startu (patrz okno_podatku)
         opis = f"{data_od.strftime('%d.%m')} — {data_do.strftime('%d.%m.%Y')}"
         return {kod: (data_od, data_do)}, opis
 

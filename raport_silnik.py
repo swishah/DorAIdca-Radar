@@ -51,6 +51,11 @@ def okno_podatku(podatek: str, data_od: datetime, data_do: datetime):
     start = datetime.strptime(utils.data_start(podatek), "%Y-%m-%d")
     if start > data_do:
         return None
+    # Interpretacje gmin (kategoria JST) sa nieliczne, a gminy publikuja w EURECE
+    # takze starsze (29.09.2026 pierwsza z 21.09.2026, 30.09 kolejna z 11.08.2025)
+    # — ruchome okno po dacie wydania by je gubilo. Codziennie caly okres od startu.
+    if utils.KATEGORIA_JST in utils.kategorie_podatku(podatek):
+        return start, data_do
     return max(data_od, start), data_do
 
 # Ruchome okno codziennej synchronizacji (zakres_synchronizacji nizej).
