@@ -287,6 +287,10 @@ SCHEMA_SQL = [
         aktywny       BOOLEAN NOT NULL DEFAULT TRUE,
         dodal         TEXT NOT NULL DEFAULT '',
         dodano        TIMESTAMPTZ NOT NULL DEFAULT now())""",
+    # Kategorie EUREKI (30.09.2026): 1 = Dyrektor KIS, 69341 = organy JST
+    # (podatek od nieruchomosci, rolny, lesny). Ta sama kolumna w Dockerze
+    # (09-harmonogram.sql) i w synchronizacji (DDL_PODATKOW).
+    "ALTER TABLE podatki_eureka ADD COLUMN IF NOT EXISTS kategorie INTEGER[] NOT NULL DEFAULT '{1}'",
 
     # ── SLOWNIK PRZEPISOW EUREKI — ustawy do wyboru przy dodawaniu podatku ──
     # Pisze GitHub Actions (tryb "slownik"); Docker dostaje kopie przez synchronizacje.
@@ -357,8 +361,8 @@ def pobierz_id_z_archiwum(db: SupabaseDB) -> set:
 def pobierz_podatki_eureka(db: SupabaseDB) -> list:
     """Aktywne podatki dodane w Dockerze, w kolejnosci dodania."""
     return db.wykonaj(
-        "SELECT kod, nazwa, przepis_id, przepis_nazwa, data_start::text AS data_start "
-        "FROM podatki_eureka WHERE aktywny ORDER BY dodano, kod", fetch=True)
+        "SELECT kod, nazwa, przepis_id, przepis_nazwa, data_start::text AS data_start, "
+        "kategorie FROM podatki_eureka WHERE aktywny ORDER BY dodano, kod", fetch=True)
 
 
 def zapisz_slownik_przepisow(db: SupabaseDB, pozycje: list) -> int:

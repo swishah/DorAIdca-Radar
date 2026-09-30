@@ -129,6 +129,33 @@ PRZEDMIOTY = {
         "inne zagadnienia opłaty cukrowej",
     ],
 
+    # Podatek od nieruchomosci — interpretacje organow gmin (kategoria JST
+    # w EURECE, ustawa o podatkach i oplatach lokalnych). Zatwierdzona przez
+    # wlasciciela 30.09.2026; srodki transportowe i oplaty lokalne z tej samej
+    # ustawy maja wlasne pozycje. Podatek rolny i lesny: bez taksonomii
+    # — pobierane, ale nie streszczane (decyzja wlasciciela).
+    "NIERUCHOMOSCI": [
+        "przedmiot opodatkowania — grunty",
+        "przedmiot opodatkowania — budynki i ich części (definicja budynku)",
+        "przedmiot opodatkowania — budowle i urządzenia (definicja budowli)",
+        "podatnik — własność, posiadanie, użytkowanie wieczyste, współwłasność",
+        "związek z prowadzeniem działalności gospodarczej",
+        "budynki i lokale mieszkalne (w tym najem, najem krótkoterminowy)",
+        "dane z ewidencji gruntów i budynków a opodatkowanie",
+        "powierzchnia użytkowa (wysokość pomieszczeń, kondygnacje)",
+        "podstawa opodatkowania budowli (wartość, amortyzacja)",
+        "stawki podatku od nieruchomości",
+        "zwolnienia ustawowe",
+        "zwolnienia i ulgi z uchwał rady gminy",
+        "grunty rolne i leśne — granica z podatkiem rolnym i leśnym",
+        "infrastruktura i energetyka (sieci, farmy wiatrowe i fotowoltaiczne)",
+        "obowiązek podatkowy — powstanie i wygaśnięcie",
+        "deklaracje, informacje (DN-1, IN-1) i terminy płatności",
+        "podatek od środków transportowych",
+        "opłaty lokalne (targowa, miejscowa, uzdrowiskowa, reklamowa, od psów)",
+        "inne zagadnienia podatków i opłat lokalnych",
+    ],
+
     "CIT": [
         "estoński CIT (ryczałt od dochodów spółek)", "podatek u źródła (WHT)",
         "ceny transferowe i podmioty powiązane", "koszty finansowania dłużniczego",

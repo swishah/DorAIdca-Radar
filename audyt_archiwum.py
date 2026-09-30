@@ -79,10 +79,12 @@ def _granice(miesiac: str) -> tuple:
 def podatki(db) -> dict:
     """{'VAT': 29955, ...} — wbudowane plus dodane z EUREKI."""
     mapa = dict(utils.KODY_PRZEPISOW)
-    for w in db.wykonaj("SELECT kod, przepis_id FROM podatki_eureka WHERE aktywny",
+    for w in db.wykonaj("SELECT kod, przepis_id, kategorie FROM podatki_eureka WHERE aktywny",
                         fetch=True) or []:
         try:
             mapa[str(w["kod"]).upper()] = int(w["przepis_id"])
+            if w.get("kategorie"):
+                utils.KATEGORIE_PODATKU[str(w["kod"]).upper()] = [int(k) for k in w["kategorie"]]
         except (TypeError, ValueError):
             continue
     return mapa
@@ -119,12 +121,13 @@ def do_sprawdzenia(db, mapa: dict, wszystko: bool) -> list:
     return [para for _, para in kolejka[:MAKS_W_PRZEBIEGU]]
 
 
-def ile_w_eurece(sesja, kod_przepisu: int, od: str, do: str) -> int:
+def ile_w_eurece(sesja, kod_przepisu: int, od: str, do: str, kategorie=None) -> int:
     """Sama liczba wynikow — size=1, czytamy totalHits, zadnej tresci."""
     url = utils.SEARCH_API_URL_BASE.format(size=1, page=0)
     payload = {
         "query": "",
-        "filter": {"KATEGORIA_INFORMACJI": [1], "PRZEPISY": [kod_przepisu],
+        "filter": {"KATEGORIA_INFORMACJI": list(kategorie or [utils.KATEGORIA_KIS]),
+                   "PRZEPISY": [kod_przepisu],
                    "DT_WYD_start": od, "DT_WYD_end": do},
         "columns": ["ID_INFORMACJI"],
         "searchInFullPhrase": False, "searchInContent": True,
@@ -174,7 +177,8 @@ def main() -> int:
         for podatek, miesiac in kolejka:
             od, do = _granice(miesiac)
             try:
-                ile = ile_w_eurece(sesja, mapa[podatek], od, do)
+                ile = ile_w_eurece(sesja, mapa[podatek], od, do,
+                                   utils.kategorie_podatku(podatek))
             except RuntimeError:
                 # Pierwsza oznaka blokady konczy przebieg. Audyt moze poczekac.
                 print("Oznaka blokady przy %s %s — koncze przebieg." % (podatek, miesiac))

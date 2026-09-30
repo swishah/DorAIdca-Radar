@@ -77,6 +77,20 @@ KODY_PRZEPISOW = {
     "PCC":    31693,
 }
 
+# Kategorie EUREKI pobierane dla podatku (filtr KATEGORIA_INFORMACJI).
+# 1 = interpretacja indywidualna Dyrektora KIS — tak pobieramy wszystko od
+# poczatku. 69341 = „Interpretacja indywidualna JST" (organy gmin; pierwsza
+# w EURECE 29.09.2026 — podatek od nieruchomosci). Podatek dodany z EUREKI
+# niesie swoje kategorie w kolumnie podatki_eureka.kategorie.
+KATEGORIA_KIS = 1
+KATEGORIA_JST = 69341
+KATEGORIE_PODATKU: dict = {}
+
+
+def kategorie_podatku(podatek: str) -> list:
+    """Kategorie EUREKI dla podatku; bez wpisu — interpretacje Dyrektora KIS."""
+    return list(KATEGORIE_PODATKU.get((podatek or "").upper()) or [KATEGORIA_KIS])
+
 
 # ---------------------------------------------------------------------------
 # DATY STARTOWE PODATKOW
@@ -133,6 +147,9 @@ def dolacz_podatki_eureka(wpisy) -> list:
             continue
         KODY_PRZEPISOW[kod] = int(w["przepis_id"])
         DATY_START_PODATKU[kod] = str(w["data_start"])[:10]
+        kategorie = [int(k) for k in (w.get("kategorie") or []) if str(k).strip()]
+        if kategorie:
+            KATEGORIE_PODATKU[kod] = kategorie
         dolaczone.append(kod)
     return dolaczone
 
@@ -593,7 +610,7 @@ def _pobierz_jedno_okno(data_start_str, data_koniec_str, sesja, nazwa_podatku,
         payload = {
             "query": "",
             "filter": {
-                "KATEGORIA_INFORMACJI": [1],
+                "KATEGORIA_INFORMACJI": kategorie_podatku(nazwa_podatku),
                 "PRZEPISY":     [kod_przepisu],
                 "DT_WYD_start": data_start_str,
                 "DT_WYD_end":   data_koniec_str
@@ -753,7 +770,7 @@ def szukaj_w_api_mf(data_start_str, data_koniec_str, fraza, sesja, nazwa_podatku
         payload = {
             "query": fraza,
             "filter": {
-                "KATEGORIA_INFORMACJI": [1],
+                "KATEGORIA_INFORMACJI": kategorie_podatku(nazwa_podatku),
                 "PRZEPISY":     [kod_przepisu],
                 "DT_WYD_start": data_start_str,
                 "DT_WYD_end":   data_koniec_str
