@@ -11,6 +11,7 @@ zeby kazdy z dwoch kontekstow mogl dostarczyc je na swoj sposob
 """
 
 import hashlib
+import os
 import threading
 from datetime import datetime
 
@@ -34,7 +35,8 @@ def parametry_z_url(url: str) -> dict:
     dbname, _, query = host_rest[slash_idx + 1:].partition("?")
     # sslmode=disable dla Postgresa bez SSL (np. kontener lokalny/NAS) —
     # bez tego parsowania trafialby literalnie do dbname i psul polaczenie.
-    sslmode = "require"
+    # Domyslnie z SUPABASE_SSLMODE (patrz nizej, SupabaseDB).
+    sslmode = os.environ.get("SUPABASE_SSLMODE", "require")
     for para in query.split("&"):
         if para.startswith("sslmode="):
             sslmode = para.split("=", 1)[1]
@@ -110,7 +112,11 @@ class SupabaseDB:
                 "password": parametry["password"],
                 # "require" domyslnie (Supabase cloud); lokalny/NAS Postgres
                 # bez SSL ustawia to jawnie na "disable" w secrets.toml.
-                "sslmode":  parametry.get("sslmode", "require"),
+                # Bez klucza "sslmode" — z SUPABASE_SSLMODE: 02.10.2026 cztery
+                # zadania harmonogramu (raport dzienny, interpretacje ogolne,
+                # audyt, uzupelnianie) nie przekazywaly sslmode i po przejsciu
+                # na lokalna baze (bez SSL) konczyly sie bledem „SSL was required”.
+                "sslmode":  parametry.get("sslmode") or os.environ.get("SUPABASE_SSLMODE", "require"),
                 "connect_timeout": 15,
             }
         # Wykrywanie zerwanych polaczen po stronie TCP. Bez tego martwe
