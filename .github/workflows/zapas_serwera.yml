@@ -1,0 +1,99 @@
+name: Zapas serwera
+
+# Serwer domowy sam pobiera z EUREKI (od 1.10.2026, okno raz na noc). Gdy milczy
+# ponad 36 godzin (prad, internet), ten workflow przejmuje pobieranie do bazy
+# w chmurze; po powrocie serwer kopiuje stamtad to, co tu pobrano.
+# Zasady i oba znaki zycia: zapas_serwera.py.
+run-name: ${{ inputs.tryb == 'zyje' && 'Serwer żyje' || 'Zapas serwera — sprawdzenie' }}
+
+on:
+  schedule:
+    - cron: '15 4,16 * * *'     # 06:15 i 18:15 czasu polskiego (latem)
+  workflow_dispatch:
+    inputs:
+      tryb:
+        description: 'zyje — znak zycia (zleca go serwer po kazdym oknie EUREKI); sprawdz — jak z harmonogramu'
+        type: choice
+        options: [sprawdz, zyje]
+        default: sprawdz
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  zyje:
+    if: inputs.tryb == 'zyje'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Znak zycia
+        run: echo "Serwer domowy zakonczyl okno EUREKI."
+
+  sprawdz:
+    if: inputs.tryb != 'zyje'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Wspolna grupa z pozostalymi przebiegami pytajacymi MF — nigdy naraz.
+    concurrency:
+      group: pobieranie-mf
+      cancel-in-progress: false
+    steps:
+      - name: Pobierz kod repozytorium
+        uses: actions/checkout@v5
+
+      - name: Ustaw Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Zainstaluj zaleznosci
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests PyPDF2 python-docx beautifulsoup4 lxml psycopg2-binary
+
+      - name: Czy serwer zyje
+        id: decyzja
+        env:
+          SUPABASE_HOST:     ${{ secrets.SUPABASE_HOST }}
+          SUPABASE_PORT:     ${{ secrets.SUPABASE_PORT }}
+          SUPABASE_DB:       ${{ secrets.SUPABASE_DB }}
+          SUPABASE_USER:     ${{ secrets.SUPABASE_USER }}
+          SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
+          GH_TOKEN:          ${{ github.token }}
+        run: python zapas_serwera.py sprawdz
+
+      - name: Interpretacje indywidualne (przejecie)
+        if: steps.decyzja.outputs.przejmij == '1'
+        env:
+          SUPABASE_HOST:     ${{ secrets.SUPABASE_HOST }}
+          SUPABASE_PORT:     ${{ secrets.SUPABASE_PORT }}
+          SUPABASE_DB:       ${{ secrets.SUPABASE_DB }}
+          SUPABASE_USER:     ${{ secrets.SUPABASE_USER }}
+          SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
+          TRYB_SYNC: zwykly
+          SYNC_MAIL: '0'
+          # Tylko to, co pojawilo sie w EURECE, gdy serwer milczal.
+          PUBLIKACJA_OD: ${{ steps.decyzja.outputs.od }}
+        run: python synchronizacja_dzienna.py
+
+      - name: Interpretacje ogolne (przejecie)
+        if: steps.decyzja.outputs.przejmij == '1'
+        env:
+          SUPABASE_HOST:     ${{ secrets.SUPABASE_HOST }}
+          SUPABASE_PORT:     ${{ secrets.SUPABASE_PORT }}
+          SUPABASE_DB:       ${{ secrets.SUPABASE_DB }}
+          SUPABASE_USER:     ${{ secrets.SUPABASE_USER }}
+          SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
+        run: python interpretacje_ogolne.py
+
+      - name: Zapis przejecia
+        if: always() && steps.decyzja.outputs.przejmij == '1'
+        env:
+          SUPABASE_HOST:     ${{ secrets.SUPABASE_HOST }}
+          SUPABASE_PORT:     ${{ secrets.SUPABASE_PORT }}
+          SUPABASE_DB:       ${{ secrets.SUPABASE_DB }}
+          SUPABASE_USER:     ${{ secrets.SUPABASE_USER }}
+          SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
+          PUBLIKACJA_OD: ${{ steps.decyzja.outputs.od }}
+        run: python zapas_serwera.py zapisz

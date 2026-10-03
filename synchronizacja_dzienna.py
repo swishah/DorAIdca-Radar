@@ -31,6 +31,16 @@ w wylapaniu spoznionej publikacji. Duplikaty i tak sa pomijane przy zapisie
 (ON CONFLICT DO NOTHING), wiec powtorne sprawdzanie tych samych dni jest
 bezpieczne.
 
+OKNO PO DACIE PUBLIKACJI (od 4.10.2026, OKNO_PUBLIKACJI_DNI albo PUBLIKACJA_OD)
+  Zamiast ruchomego okna dat WYDANIA — dokumenty, ktore w EURECE POJAWILY SIE
+  w ostatnich N dniach (albo od dnia PUBLIKACJA_OD). Okno po dacie wydania
+  musialo siegac 35 dni wstecz (poslizg publikacji 2-4 tygodnie) i co noc
+  przewijalo kilkadziesiat stron list; po dacie publikacji VAT z tygodnia to
+  3 strony. Weryfikacja po numerach dokumentow, bez drugiej listy z MF
+  (raport_silnik.synchronizuj_po_publikacji). Serwer (okno EUREKI) bierze 7 dni
+  od poniedzialku do soboty, a w niedziele pelne okno 60 dni po dacie wydania —
+  siatka bezpieczenstwa z dawna weryfikacja. Bez tych zmiennych — jak dawniej.
+
 TRYBY (zmienna TRYB_SYNC — wejscie "tryb" przy recznym uruchomieniu workflow)
   zwykly   wbudowana piatka i podatki dodane z EUREKI, ruchome okno. Tak ida
            wszystkie przebiegi z harmonogramu.
@@ -94,15 +104,20 @@ def _czy_wymaga_ponowienia(wyniki: list) -> bool:
     return any(w["status"] in statusy_wymagajace_retry for w in wyniki)
 
 
-def _wykonaj_probe(db, okna, opis_okresu, numer_proby) -> list:
+def _wykonaj_probe(db, okna, opis_okresu, numer_proby, publikacja=None) -> list:
     """okna: {podatek: (data_od, data_do)} — podatek dodany z EUREKI ma okno
-    przyciete do swojej daty startu."""
+    przyciete do swojej daty startu. publikacja: {podatek: wydane_od} — okna
+    sa wtedy oknami DATY PUBLIKACJI (patrz naglowek)."""
     wyniki = []
     for pod, (data_od, data_do) in okna.items():
         print(f"\n--- {pod} (proba {numer_proby}) ---")
-        wynik = silnik.generuj_raport_dla_podatku(
-            db, pod, data_od, data_do, opis_okresu, log_fn=print, generuj_plik=False
-        )
+        if publikacja is not None:
+            wynik = silnik.synchronizuj_po_publikacji(
+                db, pod, data_od, data_do, wydane_od=publikacja.get(pod), log_fn=print)
+        else:
+            wynik = silnik.generuj_raport_dla_podatku(
+                db, pod, data_od, data_do, opis_okresu, log_fn=print, generuj_plik=False
+            )
         wyniki.append(wynik)
         wer_info = ""
         if wynik.get("weryfikacja"):
@@ -150,6 +165,31 @@ def _sprawdz(db, dodane: list) -> None:
     print(f"[{kod}] wg miesiecy: " + ", ".join(f"{m}: {n}" for m, n in sorted(miesiace.items())))
     for d in sorted(lista, key=lambda x: x["data"], reverse=True)[:25]:
         print(f"    {d['data']}  {d['sygnatura']:<40} {w_bazie.get(d['id'], '— brak w bazie')}")
+
+
+def _okna_publikacji(dodane: list):
+    """({podatek: (pub_od, pub_do)}, {podatek: wydane_od}, opis) albo None, gdy
+    nie ustawiono OKNO_PUBLIKACJI_DNI ani PUBLIKACJA_OD (tryb dawny)."""
+    dni = (os.environ.get("OKNO_PUBLIKACJI_DNI") or "").strip()
+    od_env = (os.environ.get("PUBLIKACJA_OD") or "").strip()
+    if not dni and not od_env:
+        return None
+    data_do = datetime.now()
+    if od_env:
+        data_od = datetime.strptime(od_env, "%Y-%m-%d")
+    else:
+        data_od = data_do - timedelta(days=max(1, int(dni)) - 1)
+    okna = {pod: (data_od, data_do) for pod in silnik.PODATKI_WSZYSTKIE}
+    wydane_od = {}
+    for pod in dodane:
+        start = utils.data_start(pod)
+        if datetime.strptime(start, "%Y-%m-%d") > data_do:
+            print(f"[{pod}] pobieranie rusza od {start} — pomijam.")
+            continue
+        okna[pod] = (data_od, data_do)
+        wydane_od[pod] = start          # podatek dodany z EUREKI: od swojej daty startu
+    opis = f"opublikowane {data_od.strftime('%d.%m')} — {data_do.strftime('%d.%m.%Y')}"
+    return okna, wydane_od, opis
 
 
 def _okna(tryb: str, dodane: list) -> tuple:
@@ -219,18 +259,32 @@ def main():
     if tryb == "sprawdz":
         _sprawdz(db, dodane)
         return
-    okna, opis_okresu = _okna(tryb, dodane)
+    publikacja = None
+    okna_pub = _okna_publikacji(dodane) if tryb == "zwykly" else None
+    if okna_pub:
+        okna, publikacja, opis_okresu = okna_pub
+        print("Okno po DACIE PUBLIKACJI w EURECE: " + opis_okresu)
+    else:
+        okna, opis_okresu = _okna(tryb, dodane)
     for pod, (od, do) in okna.items():
-        print(f"Okno {pod}: {od.date()} — {do.date()}")
+        print(f"Okno {pod}: {od.date()} — {do.date()}"
+              + (f" (publikacja; wydane od {publikacja[pod]})" if publikacja and publikacja.get(pod) else ""))
 
+    # Ponawiamy TYLKO podatki, ktore tego wymagaja — reszta drugi raz nie pyta MF.
+    wg_podatku = {}
+    do_proby = okna
     wyniki = None
     proba = 1
     for proba in range(1, MAKS_PROB_CALEGO_SYNC + 1):
-        wyniki = _wykonaj_probe(db, okna, opis_okresu, proba)
+        for w in _wykonaj_probe(db, do_proby, opis_okresu, proba, publikacja):
+            wg_podatku[w["podatek"]] = w
+        wyniki = [wg_podatku[p] for p in okna if p in wg_podatku]
 
         if not _czy_wymaga_ponowienia(wyniki):
             print(f"\nProba {proba}: wszystko OK, konczy petle retry.")
             break
+        do_proby = {p: okna[p] for p in okna
+                    if p in wg_podatku and _czy_wymaga_ponowienia([wg_podatku[p]])}
 
         if proba < MAKS_PROB_CALEGO_SYNC:
             print(

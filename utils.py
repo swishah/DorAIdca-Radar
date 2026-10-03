@@ -26,6 +26,15 @@ SEARCH_API_URL_BASE = (
     "https://eureka.mf.gov.pl/api/public/v1/wyszukiwarka/informacje/"
     "?size={size}&page={page}&sort=parametryPozycjonowania%2Casc"
 )
+# LISTY DOKUMENTOW (okno dat + ustawa) sortujemy po numerze dokumentu.
+# Domyslne „parametryPozycjonowania” przy pustym zapytaniu nie jest stabilne
+# miedzy stronami: 3.10.2026 w 300 pozycjach VAT-u 4 sie powtorzyly, a w ich
+# miejsce inne dokumenty wypadly z listy. Po ID_INFORMACJI: 219 z 219, bez
+# powtorek. Wyszukiwanie fraz (szukaj_w_api_mf) zostaje przy rankingu trafnosci.
+LISTA_API_URL_BASE = (
+    "https://eureka.mf.gov.pl/api/public/v1/wyszukiwarka/informacje/"
+    "?size={size}&page={page}&sort=ID_INFORMACJI%2Casc"
+)
 # Rozmiar strony wynikow. Wiekszy = mniej zapytan = mniejsze ryzyko throttlingu
 # i szybciej. MF akceptuje 100.
 ROZMIAR_STRONY = 100
@@ -581,10 +590,14 @@ def _mapuj_dokument(d, nazwa_podatku):
     }
 
 def _pobierz_jedno_okno(data_start_str, data_koniec_str, sesja, nazwa_podatku,
-                        kod_przepisu, log_fn=None):
+                        kod_przepisu, log_fn=None, pole_daty="DT_WYD", wydane_od=None):
     """
     Pobiera WSZYSTKIE strony dla JEDNEGO przedzialu dat, bez dzielenia.
     Zwraca (dokumenty, status, total_hits).
+
+    pole_daty: "DT_WYD" (data wydania) albo "DATA_PUBLIKACJI" (dzien pojawienia
+    sie w EURECE). wydane_od: przy oknie publikacji dolna granica daty wydania
+    (podatki dodane z EUREKI zbieramy od ich daty startu).
 
     Statusy:
       "OK"                – pobrano tyle, ile API zadeklarowalo w totalHits
@@ -600,21 +613,27 @@ def _pobierz_jedno_okno(data_start_str, data_koniec_str, sesja, nazwa_podatku,
             log_fn(msg)
 
     dokumenty  = []
+    widziane   = set()     # ten sam dokument na dwoch stronach liczymy raz
     page       = 0
     total_hits = None
     puste_z_rzedu = 0
     MAKS_PUSTYCH_Z_RZEDU = 2   # pusta strona ponawiana zanim uznamy ja za koniec
 
+    filtr = {
+        "KATEGORIA_INFORMACJI": kategorie_podatku(nazwa_podatku),
+        "PRZEPISY":     [kod_przepisu],
+        pole_daty + "_start": data_start_str,
+        pole_daty + "_end":   data_koniec_str,
+    }
+    if wydane_od and pole_daty != "DT_WYD":
+        filtr["DT_WYD_start"] = wydane_od
+        filtr["DT_WYD_end"] = data_koniec_str
+
     while True:
-        url     = SEARCH_API_URL_BASE.format(size=ROZMIAR_STRONY, page=page)
+        url     = LISTA_API_URL_BASE.format(size=ROZMIAR_STRONY, page=page)
         payload = {
             "query": "",
-            "filter": {
-                "KATEGORIA_INFORMACJI": kategorie_podatku(nazwa_podatku),
-                "PRZEPISY":     [kod_przepisu],
-                "DT_WYD_start": data_start_str,
-                "DT_WYD_end":   data_koniec_str
-            },
+            "filter": filtr,
             "columns": ["SYG", "ID_INFORMACJI", "DT_WYD", "KATEGORIA_INFORMACJI"],
             "searchInFullPhrase": True,
             "searchInContent":    False,
@@ -637,7 +656,8 @@ def _pobierz_jedno_okno(data_start_str, data_koniec_str, sesja, nazwa_podatku,
         przed = len(dokumenty)
         for d in wyniki:
             dok = _mapuj_dokument(d, nazwa_podatku)
-            if dok:
+            if dok and dok["id"] not in widziane:
+                widziane.add(dok["id"])
                 dokumenty.append(dok)
         dodano = len(dokumenty) - przed
         _log(f"    [strona {page}] pobrano {len(wyniki)} rekordow "
@@ -699,7 +719,8 @@ def _podziel_okres(data_start_str, data_koniec_str):
 
 
 def pobierz_wszystko_z_okresu(data_start_str, data_koniec_str, sesja, nazwa_podatku,
-                              kod_przepisu, log_fn=None, _poziom=0):
+                              kod_przepisu, log_fn=None, _poziom=0,
+                              pole_daty="DT_WYD", wydane_od=None):
     """
     kod_przepisu: numeryczny ID aktu prawnego z KODY_PRZEPISOW (np. 29903 dla PIT).
     To jest PRAWDZIWY filtr uzywany przez API - identyczny z tym, czego
@@ -711,6 +732,7 @@ def pobierz_wszystko_z_okresu(data_start_str, data_koniec_str, sesja, nazwa_poda
     Dzieki temu duze okna (np. caly miesiac VAT) nie sa juz ucinane.
 
     log_fn: opcjonalna funkcja logujaca (np. print albo callback Streamlit).
+    pole_daty, wydane_od: patrz _pobierz_jedno_okno (okno po dacie publikacji).
     Zwraca (dokumenty, status: "OK"|"NIEPELNE_POBRANIE"|"ERROR").
     """
     def _log(msg):
@@ -718,10 +740,12 @@ def pobierz_wszystko_z_okresu(data_start_str, data_koniec_str, sesja, nazwa_poda
             log_fn(msg)
 
     wciecie = "  " * _poziom
-    _log(f"{wciecie}[{nazwa_podatku}] Okno {data_start_str}..{data_koniec_str}")
+    _log(f"{wciecie}[{nazwa_podatku}] Okno {data_start_str}..{data_koniec_str}"
+         + (" (data publikacji)" if pole_daty == "DATA_PUBLIKACJI" else ""))
 
     dokumenty, status, total_hits = _pobierz_jedno_okno(
-        data_start_str, data_koniec_str, sesja, nazwa_podatku, kod_przepisu, log_fn=_log
+        data_start_str, data_koniec_str, sesja, nazwa_podatku, kod_przepisu, log_fn=_log,
+        pole_daty=pole_daty, wydane_od=wydane_od,
     )
 
     # ── Okno miesci sie w limicie i pobralo komplet ──
@@ -740,6 +764,7 @@ def pobierz_wszystko_z_okresu(data_start_str, data_koniec_str, sesja, nazwa_poda
                 pod_dok, pod_status = pobierz_wszystko_z_okresu(
                     s, k, sesja, nazwa_podatku, kod_przepisu,
                     log_fn=log_fn, _poziom=_poziom + 1,
+                    pole_daty=pole_daty, wydane_od=wydane_od,
                 )
                 for d in pod_dok:
                     scalone[d["id"]] = d

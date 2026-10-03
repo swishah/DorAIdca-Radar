@@ -411,6 +411,112 @@ def generuj_raport_dla_podatku(
 
 
 # ---------------------------------------------------------------------------
+# SYNCHRONIZACJA PO DACIE PUBLIKACJI (od 4.10.2026)
+# ---------------------------------------------------------------------------
+def _w_archiwum(db: db_core.SupabaseDB, ids: list) -> set:
+    if not ids:
+        return set()
+    return {r["id"] for r in db.wykonaj(
+        "SELECT id FROM dokumenty WHERE id = ANY(%s)", (ids,), fetch=True) or []}
+
+
+def synchronizuj_po_publikacji(
+    db: db_core.SupabaseDB,
+    podatek: str,
+    pub_od: datetime,
+    pub_do: datetime,
+    wydane_od: str | None = None,
+    log_fn=print,
+    workers: int = 4,
+) -> dict:
+    """
+    Codzienna synchronizacja wedlug DATY PUBLIKACJI w EURECE zamiast ruchomego
+    okna dat wydania (decyzja wlasciciela 3.10.2026: mniej zapytan do MF).
+
+    DLACZEGO TAK
+      Okno po dacie wydania musialo siegac 35 dni wstecz, bo MF publikuje
+      z poslizgiem 2-4 tygodni — co noc kilkadziesiat stron list, plus druga
+      lista do weryfikacji. Filtr DATA_PUBLIKACJI bierze to, co sie w EURECE
+      POJAWILO: VAT z tygodnia to ok. 220 pozycji (3 strony) zamiast ok. 900.
+      Sprawdzone 3.10.2026 na 300 interpretacjach VAT: data publikacji to dzien
+      pojawienia sie w API (pobieralismy je tego samego albo nastepnego dnia,
+      najpozniej po 3 dniach) — okno 7 dni ma wiec zapas na kilka nocy przerwy.
+
+    WERYFIKACJA BEZ DRUGIEGO ZAPYTANIA
+      Lista jest kompletna, gdy zebralismy tyle unikalnych numerow, ile MF
+      zglasza w totalHits (inaczej okno dzieli sie samo). Po pobraniu kazdy
+      numer z listy musi byc w archiwum — poza dokumentami bez pobieralnej
+      tresci (skany). Pelne okno 60 dni po dacie wydania z druga lista zostaje
+      raz w tygodniu (niedziela) jako siatka bezpieczenstwa.
+
+    wydane_od: dolna granica daty wydania (podatki dodane z EUREKI od daty startu).
+    Zwraca slownik jak generuj_raport_dla_podatku (bez pliku Word).
+    """
+    od, do = pub_od.strftime("%Y-%m-%d"), pub_do.strftime("%Y-%m-%d")
+    try:
+        log_fn(f"[{podatek}] Sprawdzam API MF: opublikowane {od} — {do}"
+               + (f", wydane od {wydane_od}" if wydane_od else "") + "...")
+        with requests.Session() as sesja:
+            lista, status_listy = utils.pobierz_wszystko_z_okresu(
+                od, do, sesja, podatek, utils.KODY_PRZEPISOW[podatek], log_fn=log_fn,
+                pole_daty="DATA_PUBLIKACJI", wydane_od=wydane_od,
+            )
+        if status_listy == "ERROR":
+            log_fn(f"[{podatek}] OSTRZEZENIE: API MF zwrocilo status ERROR")
+            return {"podatek": podatek, "liczba_dok": 0, "plik_bytes": None,
+                    "nowych_pobranych": 0, "status": "ERROR", "weryfikacja": None}
+
+        ids = list(dict.fromkeys(d["id"] for d in lista))
+        maja = _w_archiwum(db, ids)
+        do_pobrania = [d for d in lista if d["id"] not in maja]
+        log_fn(f"[{podatek}] Opublikowanych w MF: {len(ids)}, do pobrania: {len(do_pobrania)}")
+
+        zapisanych, uszkodzone, blokada, do_ponowienia = 0, [], False, []
+        if do_pobrania:
+            def on_postep(completed, total, sygnatura, status_dok):
+                if completed % 10 == 0 or completed == total:
+                    log_fn(f"[{podatek}] Postep pobierania tresci: {completed}/{total}")
+
+            nowe_tresci, _, uszkodzone, blokada, do_ponowienia = utils.pobierz_dokumenty_rownolegle(
+                do_pobrania, maja, set(), callback_postep=on_postep, workers=workers, log_fn=log_fn,
+            )
+            if nowe_tresci:
+                zapisanych = db_core.zapisz_wiele_do_archiwum(db, nowe_tresci, "raport_na_zadanie")
+                log_fn(f"[{podatek}] Zapisano {zapisanych} nowych dokumentow.")
+
+        maja = _w_archiwum(db, ids)
+        bez_tresci = set(uszkodzone)
+        brakuje = [i for i in ids if i not in maja and i not in bez_tresci]
+        weryfikacja = {
+            "zgodnosc": not brakuje, "liczba_w_mf": len(ids),
+            "liczba_w_archiwum": len(ids) - len(brakuje), "roznica": len(brakuje),
+            "status": "OK" if not brakuje else "NIEZGODNOSC",
+        }
+        if bez_tresci:
+            log_fn(f"[{podatek}] {len(bez_tresci)} dokumentow bez pobieralnej tresci (skany) — pomijam.")
+        if status_listy != "OK":
+            # Lista niepelna mimo dzielenia okna — nie wiemy, czego nie wiemy.
+            status = "WERYFIKACJA_NIEUDANA"
+        elif blokada or do_ponowienia:
+            log_fn(f"[{podatek}] {len(do_ponowienia)} dokumentow nie pobrano (blokada/timeout) — "
+                   f"zostana ponowione.")
+            status = "BLOKADA"
+        elif brakuje:
+            log_fn(f"[{podatek}] NIEZGODNOSC — brak w archiwum {len(brakuje)} z {len(ids)} opublikowanych.")
+            status = "NIEZGODNOSC"
+        else:
+            log_fn(f"[{podatek}] Weryfikacja OK — wszystkie {len(ids)} opublikowane sa w archiwum.")
+            status = "OK"
+        return {"podatek": podatek, "liczba_dok": len(ids), "plik_bytes": None,
+                "nowych_pobranych": zapisanych, "status": status, "weryfikacja": weryfikacja}
+
+    except Exception as e:
+        log_fn(f"[{podatek}] BLAD: {e}")
+        return {"podatek": podatek, "liczba_dok": 0, "plik_bytes": None, "nowych_pobranych": 0,
+                "status": "ERROR", "error_msg": str(e), "weryfikacja": None}
+
+
+# ---------------------------------------------------------------------------
 # WYSYLKA POWIADOMIENIA MAILEM — BEZ ZALACZNIKA (Sciagacz Interpretacji)
 # ---------------------------------------------------------------------------
 def wyslij_email_powiadomienie_pobrania(
