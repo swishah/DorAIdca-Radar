@@ -91,6 +91,13 @@ class BladCBOSA(Exception):
     pass
 
 
+class OdmowaCBOSA(BladCBOSA):
+    """CBOSA zrywa polaczenia (RemoteDisconnected, reset) mimo ponowien — blokada
+    adresu po serii zapytan. Przebieg ma sie wtedy skonczyc, a nie pytac dalej:
+    4.10.2026 przeglad tygodniowy przez godzine ponawial 9 wyszukiwan po 3 razy
+    w zablokowany CBOSA, co tylko przedluza blokade."""
+
+
 # ---------------------------------------------------------------------------
 # MOST — obejscie blokady adresow GitHub Actions
 # ---------------------------------------------------------------------------
@@ -235,6 +242,7 @@ def _przez_most(sesja: requests.Session, metoda: str, url: str, **kw) -> Odpowie
 # HTTP z ponowieniami
 # ---------------------------------------------------------------------------
 def _zadanie(sesja: requests.Session, metoda: str, url: str, log_fn=None, **kw):
+    zerwane = 0          # proby zakonczone zerwanym albo odrzuconym polaczeniem
     for proba in range(1, MAKS_PROB_HTTP + 1):
         try:
             time.sleep(PAUZA_S)
@@ -247,10 +255,13 @@ def _zadanie(sesja: requests.Session, metoda: str, url: str, log_fn=None, **kw):
             if log_fn:
                 log_fn(f"    HTTP {r.status_code} dla {url} (proba {proba})")
         except requests.RequestException as e:
+            zerwane += 1
             if log_fn:
                 log_fn(f"    Blad polaczenia: {e} (proba {proba})")
         if proba < MAKS_PROB_HTTP:
             time.sleep(PAUZA_PO_BLEDZIE_S * proba)
+    if zerwane == MAKS_PROB_HTTP:
+        raise OdmowaCBOSA(f"CBOSA zrywa polaczenia ({url}, {MAKS_PROB_HTTP} proby) — blokada adresu")
     raise BladCBOSA(f"Nie udalo sie pobrac {url} po {MAKS_PROB_HTTP} probach")
 
 

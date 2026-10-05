@@ -129,6 +129,8 @@ def strumien_metadane(db, sesja, formularz, log=print):
         log(f"\n[{podatek}] symbol {symbol} | okno {od_p}..{do_p}")
         try:
             lista, total = cbosa.szukaj(sesja, formularz, symbol, od_p, do_p, log_fn=log)
+        except cbosa.OdmowaCBOSA:
+            raise           # blokada: koniec przebiegu, nie nastepny podatek
         except cbosa.BladCBOSA as e:
             log(f"[{podatek}] BLAD wyszukiwania: {e}")
             db_wyroki.zapisz_historie_sync_wyrokow(db, "METADANE", od, do, podatek,
@@ -161,6 +163,8 @@ def strumien_metadane(db, sesja, formularz, log=print):
                 nowych += 1
                 if k % 10 == 0 or k == len(nowe_id):
                     log(f"[{podatek}] Postep szczegolow: {k}/{len(nowe_id)}")
+            except cbosa.OdmowaCBOSA:
+                raise
             except Exception as e:
                 bledy += 1
                 log(f"[{podatek}] Blad dokumentu {did}: {e}")
@@ -195,6 +199,8 @@ def strumien_uzasadnienia(db, sesja, formularz, log=print):
         try:
             lista, total = cbosa.szukaj(sesja, formularz, symbol, od_p, do_p,
                                         tylko_z_uzasadnieniem=True, log_fn=log)
+        except cbosa.OdmowaCBOSA:
+            raise           # blokada: koniec przebiegu, nie nastepny podatek
         except cbosa.BladCBOSA as e:
             log(f"[{podatek}] BLAD wyszukiwania: {e}")
             db_wyroki.zapisz_historie_sync_wyrokow(db, "UZASADNIENIA", od, do, podatek,
@@ -234,6 +240,8 @@ def strumien_uzasadnienia(db, sesja, formularz, log=print):
                     zaktual += 1
                 if k % 10 == 0 or k == len(do_pobrania):
                     log(f"[{podatek}] Postep: {k}/{len(do_pobrania)}")
+            except cbosa.OdmowaCBOSA:
+                raise
             except Exception as e:
                 bledy += 1
                 log(f"[{podatek}] Blad dokumentu {did}: {e}")
@@ -285,6 +293,8 @@ def strumien_prawomocnosc(db, sesja, formularz, log=print):
         try:
             lista, total = cbosa.szukaj(sesja, formularz, symbol, od_p, do_p,
                                         tylko_prawomocne=True, log_fn=log)
+        except cbosa.OdmowaCBOSA:
+            raise           # blokada: koniec przebiegu, nie nastepny podatek
         except cbosa.BladCBOSA as e:
             log(f"[{podatek}] BLAD wyszukiwania: {e}")
             db_wyroki.zapisz_historie_sync_wyrokow(db, "PRAWOMOCNOSC", od, do, podatek,
@@ -414,6 +424,11 @@ def main():
                 break
             ostatni_blad = f"{bledy} bledow wyszukiwania"
             print(f"\nProba {proba}: {ostatni_blad}.")
+        except cbosa.OdmowaCBOSA as e:
+            # Blokada adresu: ponawianie calosci po 10 minutach tylko ja przedluza.
+            ostatni_blad = f"CBOSA odmawia — przebieg zakonczony bez ponawiania ({e})"
+            print(f"\nProba {proba}: {ostatni_blad}")
+            break
         except (cbosa.BladCBOSA, Exception) as e:
             ostatni_blad = str(e)
             print(f"\nProba {proba} przerwana bledem: {e}")
