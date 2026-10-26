@@ -141,6 +141,10 @@ def zbierz_streszczenia(db) -> dict:
            WHERE d.data_wyd >= %s
              AND (s.dokument_id IS NULL OR coalesce(s.streszczenie, '') = ''
                   OR length(s.streszczenie) < 120)
+             -- Tylko podatki, które automat streszcza (mają taksonomię przedmiotów — jak
+             -- kolejka_streszczen). Spadki i darowizny, rolny, leśny: tylko do bazy (26.10.2026).
+             AND upper(d.podatek) IN (SELECT DISTINCT upper(podatek) FROM taksonomia_przedmiotow
+                                      WHERE aktywny AND coalesce(podatek, '') <> '')
            GROUP BY 1 ORDER BY 2 DESC""",
         (MODEL_KANONICZNY, DATA_START), fetch=True) or []
 
