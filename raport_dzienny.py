@@ -110,12 +110,19 @@ def zbierz_synchronizacje(db) -> dict:
     # Braki w archiwum wedlug audytu kompletnosci (schemat 24). Do 21.09.2026
     # nie dalo sie odpowiedziec na pytanie „czy archiwum jest kompletne";
     # teraz odpowiedz przychodzi sama, codziennie.
+    # Widok braki_archiwum istnieje tylko w chmurze. Na serwerze (NAS) samo
+    # zapytanie zostawiało co rano ERROR w dzienniku bazy (09.11.2026) — pytamy
+    # więc najpierw, czy widok jest.
+    braki = []
     try:
-        braki = db.wykonaj(
-            """SELECT podatek, sum(brakuje)::int AS brakuje, count(*)::int AS miesiecy
-               FROM braki_archiwum GROUP BY 1 ORDER BY 2 DESC""", fetch=True) or []
+        jest = db.wykonaj("SELECT to_regclass('public.braki_archiwum') IS NOT NULL AS jest",
+                          fetch=True) or [{}]
+        if jest[0].get("jest"):
+            braki = db.wykonaj(
+                """SELECT podatek, sum(brakuje)::int AS brakuje, count(*)::int AS miesiecy
+                   FROM braki_archiwum GROUP BY 1 ORDER BY 2 DESC""", fetch=True) or []
     except Exception:
-        braki = []              # tabela istnieje tylko w chmurze
+        braki = []
 
     return {"przebiegi": przebiegi, "ostatni_ok": ostatni_ok,
             "godzin_od_ok": godzin, "nowe": nowe, "braki": braki,
